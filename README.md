@@ -1,7 +1,8 @@
-# handoff
+# handoff — Claude Code plugin to delegate build & review tasks to Codex, Grok, or Kiro
 
-Hand off a **build** or **review** to another one-shot headless agent — **Codex**, **Grok**, or **Kiro** —
-over a single uniform, fail-closed contract. One driver, three ~50-line adapters, six slash commands.
+Hand off a **build** or **review** from Claude Code to another one-shot headless coding agent —
+**Codex**, **Grok**, or **Kiro** — over a single uniform, fail-closed contract. One driver, three
+~50-line adapters, six slash commands.
 
 ```
 /handoff:codex-build   <what to build>      /handoff:codex-review   <what to review>
