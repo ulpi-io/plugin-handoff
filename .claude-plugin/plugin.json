@@ -6,8 +6,8 @@
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"
   },
-  "homepage": "https://github.com/ulpi-io/handoff",
-  "repository": "https://github.com/ulpi-io/handoff",
+  "homepage": "https://github.com/ulpi-io/plugin-handoff",
+  "repository": "https://github.com/ulpi-io/plugin-handoff",
   "license": "MIT",
   "keywords": ["handoff", "delegate", "codex", "grok", "kiro", "claude", "opencode", "cursor", "review", "build", "agents"],
   "commands": "./commands",
