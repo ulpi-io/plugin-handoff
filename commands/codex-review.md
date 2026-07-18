@@ -10,5 +10,5 @@ Use the **handoff-run** skill to hand off a **review** to **Codex**.
 - request: $ARGUMENTS
 
 Scope it into a brief written to a file, then run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.mjs" --provider codex --verb review --prompt-file <file> --cwd "$(pwd)" --structured`
+`node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" --provider codex --verb review --prompt-file <file> --cwd "$(pwd)" --structured`
 and present the findings the driver returns. It runs read-only — it must not modify anything.

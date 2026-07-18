@@ -2,9 +2,9 @@
 name: handoff-run
 description: |
   Shared workflow behind every /handoff:<provider>-<verb> command. Hands off a BUILD or REVIEW task to
-  a one-shot headless agent (Codex, Grok, or Kiro) through the deterministic driver
+  a one-shot headless agent (Codex, Grok, Kiro, Claude, opencode, or Cursor) through the deterministic driver
   scripts/handoff.mjs. Invoke it when a /handoff:* command fires, or when the user asks to "hand off",
-  "delegate to codex/grok/kiro", "have grok review", "let kiro build", etc. It scopes the request into
+  "delegate to codex/grok/kiro/claude/opencode/cursor", "have grok review", "let kiro build", etc. It scopes the request into
   an injection-safe brief, runs the target CLI with trust scoped to the verb, and reports GROUND TRUTH
   (the real git diff for a build; findings for a review) — never a self-reported clean.
 allowed-tools: [Bash, Read, Write, Grep, Glob]
@@ -29,7 +29,7 @@ Delegate one bounded unit of work to an external one-shot agent and report what 
 - Bounded: one handoff = one build or one review of one scoped unit. Do not loop unattended.
 </EXTREMELY-IMPORTANT>
 
-You are given a **provider** (`codex|grok|kiro`), a **verb** (`build|review`), and the user's **request**.
+You are given a **provider** (`codex|grok|kiro|claude|opencode|cursor`), a **verb** (`build|review`), and the user's **request**.
 
 ## Phase 1 — Scope the request into a brief
 
@@ -55,7 +55,7 @@ Success criterion: the file exists and holds the full brief.
 ## Phase 3 — Run the driver
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.mjs" \
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" \
   --provider <provider> --verb <verb> \
   --prompt-file <the file from Phase 2> \
   --cwd "$(pwd)" \

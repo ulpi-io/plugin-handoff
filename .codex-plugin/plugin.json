@@ -1,0 +1,29 @@
+{
+  "name": "handoff",
+  "version": "0.1.0",
+  "description": "Hand off a build or review task to another one-shot headless agent — Codex, Grok, Kiro, Claude, opencode, or Cursor — over a single uniform, fail-closed contract. The prompt is fed as literal bytes (never argv), trust is scoped to the verb (read-only for review, least-write for build), and an agent that cannot run is reported as gateNotRun, never a fabricated clean.",
+  "author": {
+    "name": "ulpi.io",
+    "url": "https://github.com/ulpi-io"
+  },
+  "homepage": "https://github.com/ulpi-io/handoff",
+  "repository": "https://github.com/ulpi-io/handoff",
+  "license": "MIT",
+  "keywords": ["handoff", "delegate", "codex", "grok", "kiro", "claude", "opencode", "cursor", "review", "build", "agents"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Handoff",
+    "shortDescription": "Delegate build & review to Codex, Grok, Kiro, Claude, opencode, or Cursor",
+    "longDescription": "Hand off one bounded build or review to another one-shot headless coding agent over a single uniform, fail-closed contract. The brief is delivered as literal bytes (never on argv), trust is scoped to the verb (read-only review, least-write build; the dangerous bypass only under an explicit autonomous mode), and a build is judged by the real git diff — an agent that cannot run is reported as gateNotRun, never a fabricated clean.",
+    "developerName": "ulpi.io",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/ulpi-io/handoff",
+    "defaultPrompt": [
+      "Have Codex review the diff in src/auth",
+      "Let Grok build the parser in src/parse.ts",
+      "Have Claude review this module, read-only"
+    ],
+    "brandColor": "#6366F1"
+  }
+}

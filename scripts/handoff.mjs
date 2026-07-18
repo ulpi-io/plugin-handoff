@@ -14,7 +14,7 @@
 //      A CLI that could not run is reported nonRun — never a fabricated clean or block.
 //
 // Usage:
-//   node handoff.mjs --provider <codex|grok|kiro> --verb <build|review> --prompt-file <PATH>
+//   node handoff.mjs --provider <codex|grok|kiro|claude|opencode|cursor> --verb <build|review> --prompt-file <PATH>
 //        [--cwd DIR] [--model M] [--effort E] [--resume [ID]] [--structured] [--mode autonomous] [--json]
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
@@ -25,11 +25,14 @@ import { randomUUID } from 'node:crypto';
 import * as codex from './lib/providers/codex.mjs';
 import * as grok from './lib/providers/grok.mjs';
 import * as kiro from './lib/providers/kiro.mjs';
+import * as claude from './lib/providers/claude.mjs';
+import * as opencode from './lib/providers/opencode.mjs';
+import * as cursor from './lib/providers/cursor.mjs';
 import { readPromptFile, HandoffError } from './lib/prompt.mjs';
 import { isRepo, headSha, diffStat } from './lib/git.mjs';
 import { REVIEW_SCHEMA, renderFindings } from './lib/render.mjs';
 
-const PROVIDERS = { codex, grok, kiro };
+const PROVIDERS = { codex, grok, kiro, claude, opencode, cursor };
 const VERBS = new Set(['build', 'review']);
 
 const EXIT = { OK: 0, RAN_NONZERO: 2, MISSING: 3, AUTH: 4, USAGE: 5, NO_DIFF: 6, BAD_HANDOFF: 7 };
@@ -60,7 +63,7 @@ function fail(exit, msg, extra = {}) {
 
 function run(opts) {
   const adapter = PROVIDERS[opts.provider];
-  if (!adapter) return fail(EXIT.USAGE, `--provider must be one of codex|grok|kiro (got '${opts.provider}')`);
+  if (!adapter) return fail(EXIT.USAGE, `--provider must be one of codex|grok|kiro|claude|opencode|cursor (got '${opts.provider}')`);
   if (!VERBS.has(opts.verb)) return fail(EXIT.USAGE, `--verb must be build|review (got '${opts.verb}')`);
   if (opts.mode !== 'scoped' && opts.mode !== 'autonomous') return fail(EXIT.USAGE, `--mode must be scoped|autonomous (got '${opts.mode}')`);
 

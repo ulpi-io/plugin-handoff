@@ -1,0 +1,20 @@
+{
+  "name": "ulpi",
+  "interface": {
+    "displayName": "ULPI"
+  },
+  "plugins": [
+    {
+      "name": "handoff",
+      "source": {
+        "source": "local",
+        "path": "."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

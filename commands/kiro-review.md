@@ -10,6 +10,6 @@ Use the **handoff-run** skill to hand off a **review** to **Kiro**.
 - request: $ARGUMENTS
 
 Scope it into a brief written to a file, then run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.mjs" --provider kiro --verb review --prompt-file <file> --cwd "$(pwd)"`
+`node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" --provider kiro --verb review --prompt-file <file> --cwd "$(pwd)"`
 and present the findings. Kiro chat has no structured-output flag, so ask (in the brief) for the findings
 as a JSON block. It runs with no write access — it must not modify anything.

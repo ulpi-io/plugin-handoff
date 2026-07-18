@@ -15,6 +15,9 @@ import { randomUUID } from 'node:crypto';
 import * as codex from '../scripts/lib/providers/codex.mjs';
 import * as grok from '../scripts/lib/providers/grok.mjs';
 import * as kiro from '../scripts/lib/providers/kiro.mjs';
+import * as claude from '../scripts/lib/providers/claude.mjs';
+import * as opencode from '../scripts/lib/providers/opencode.mjs';
+import * as cursor from '../scripts/lib/providers/cursor.mjs';
 import { parseArgs, run, EXIT } from '../scripts/handoff.mjs';
 import { readPromptFile, HandoffError } from '../scripts/lib/prompt.mjs';
 import { REVIEW_SCHEMA } from '../scripts/lib/render.mjs';
@@ -52,8 +55,46 @@ test('kiro: prompt via stdin, trust scoped (review has NO fs_write, build does)'
   assert.ok(b.args.some((a) => a === '--trust-tools=fs_read,fs_write,execute_bash'));
 });
 
+test('claude: prompt via stdin (no positional), manual for review / auto for build', () => {
+  const r = claude.invocation({ verb: 'review', cwd: '/w' });
+  assert.equal(r.stdin, 'file');            // driver pipes bytes to stdin
+  assert.ok(r.args.includes('-p'));         // headless print mode
+  assert.ok(!r.args.includes(BRIEF));       // the prompt-file path is not passed to claude
+  const pm = r.args.indexOf('--permission-mode');
+  assert.ok(pm >= 0 && r.args[pm + 1] === 'manual'); // review is strict read-only
+  const b = claude.invocation({ verb: 'build', cwd: '/w' });
+  const bpm = b.args.indexOf('--permission-mode');
+  assert.ok(bpm >= 0 && b.args[bpm + 1] === 'auto'); // build edits + runs, classifier-guarded
+  // structured review carries the canonical schema inline; a plain review does not.
+  const s = claude.invocation({ verb: 'review', cwd: '/w', schemaJson: JSON.stringify(REVIEW_SCHEMA) });
+  assert.ok(s.args.includes('--json-schema'));
+});
+
+test('opencode: prompt via --file PATH (bytes stay in the file), plan for review / build for build', () => {
+  const r = opencode.invocation({ verb: 'review', cwd: '/w', promptFile: BRIEF });
+  assert.equal(r.stdin, 'none');
+  const i = r.args.indexOf('--file');
+  assert.ok(i >= 0 && r.args[i + 1] === BRIEF); // a PATH, not the bytes
+  const ag = r.args.indexOf('--agent');
+  assert.ok(ag >= 0 && r.args[ag + 1] === 'plan'); // read-only agent
+  const b = opencode.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF });
+  const bag = b.args.indexOf('--agent');
+  assert.ok(bag >= 0 && b.args[bag + 1] === 'build');
+});
+
+test('cursor: prompt via stdin (no positional), review has NO --force, build does (best-effort RO)', () => {
+  const r = cursor.invocation({ verb: 'review', cwd: '/w' });
+  assert.equal(r.stdin, 'file');            // driver pipes bytes to stdin
+  assert.ok(r.args.includes('-p'));
+  assert.ok(!r.args.includes(BRIEF));       // no prompt-file path on argv
+  assert.ok(!r.args.includes('--force'));   // review does not force-allow writes (best-effort read-only)
+  const b = cursor.invocation({ verb: 'build', cwd: '/w' });
+  assert.ok(b.args.includes('--force'));    // build force-allows writes
+  assert.ok(!b.args.includes('--approve-mcps'));
+});
+
 test('no adapter ever puts the literal prompt bytes into argv', () => {
-  for (const [p, adapter] of [['codex', codex], ['grok', grok], ['kiro', kiro]]) {
+  for (const [p, adapter] of [['codex', codex], ['grok', grok], ['kiro', kiro], ['claude', claude], ['opencode', opencode], ['cursor', cursor]]) {
     for (const verb of ['build', 'review']) {
       const inv = adapter.invocation({ verb, cwd: '/w', promptFile: BRIEF });
       assert.ok(!inv.args.includes(SECRET), `${p}/${verb} leaked prompt bytes into argv`);
@@ -67,10 +108,36 @@ test('bypass/danger/trust-all levers appear ONLY under --mode autonomous', () =>
   assert.ok(!codex.invocation({ verb: 'build', cwd: '/w' }).args.includes('danger-full-access'));
   assert.ok(!grok.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF }).args.includes('bypassPermissions'));
   assert.ok(!kiro.invocation({ verb: 'build' }).args.includes('--trust-all-tools'));
+  assert.ok(!claude.invocation({ verb: 'build', cwd: '/w' }).args.includes('bypassPermissions'));
+  assert.ok(!opencode.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF }).args.includes('--auto'));
+  assert.ok(!cursor.invocation({ verb: 'build', cwd: '/w' }).args.includes('--approve-mcps')); // cursor's extra bypass
   // autonomous: each unlocks its bypass
   assert.ok(codex.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('danger-full-access'));
   assert.ok(grok.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF, mode: 'autonomous' }).args.includes('bypassPermissions'));
   assert.ok(kiro.invocation({ verb: 'build', mode: 'autonomous' }).args.includes('--trust-all-tools'));
+  assert.ok(claude.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('bypassPermissions'));
+  assert.ok(opencode.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF, mode: 'autonomous' }).args.includes('--auto'));
+  assert.ok(cursor.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('--approve-mcps'));
+});
+
+// ---- provider capture: envelope parsing (claude) + plain text (opencode) ----
+test('claude.capture: unwraps JSON envelope, flags is_error, extracts structured_output', () => {
+  const envelope = JSON.stringify({ result: 'looks good', is_error: false, structured_output: { findings: [] } });
+  const ok = claude.capture({ code: 0, stdout: envelope, stderr: '', structured: true });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.text, 'looks good');           // .result becomes the text
+  assert.deepEqual(ok.findings, { findings: [] }); // structured_output surfaced as findings
+  const errd = claude.capture({ code: 0, stdout: JSON.stringify({ result: 'x', is_error: true }), stderr: '' });
+  assert.equal(errd.ok, false);                  // is_error overrides a zero exit
+  const nonJson = claude.capture({ code: 1, stdout: 'boom (not json)', stderr: 'err' });
+  assert.equal(nonJson.ok, false);
+  assert.equal(nonJson.text, 'boom (not json)'); // defensive fallback keeps raw text
+});
+
+test('opencode.capture: plain text, ok tracks exit code', () => {
+  assert.equal(opencode.capture({ code: 0, stdout: ' done ', stderr: '' }).ok, true);
+  assert.equal(opencode.capture({ code: 0, stdout: ' done ', stderr: '' }).text, 'done');
+  assert.equal(opencode.capture({ code: 2, stdout: '', stderr: 'nope' }).ok, false);
 });
 
 // ---- driver arg parsing ----
