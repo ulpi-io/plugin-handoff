@@ -1,6 +1,6 @@
 {
   "schemaVersion": "handoff.bundle-digest.v0.2",
-  "bundleVersion": "0.2.1",
+  "bundleVersion": "0.3.0",
   "algorithm": "sha256",
   "files": [
     ".claude-plugin/plugin.json",
@@ -10,15 +10,14 @@
     "contracts/v0.2/request.schema.json",
     "contracts/v0.2/result.schema.json",
     "scripts/handoff.mjs",
+    "scripts/prepare-request.mjs",
     "scripts/lib/agents-policy.mjs",
     "scripts/lib/bundle.mjs",
     "scripts/lib/contracts.mjs",
     "scripts/lib/git.mjs",
     "scripts/lib/machine.mjs",
     "scripts/lib/paths.mjs",
-    "scripts/lib/prompt.mjs",
     "scripts/lib/provider-preflight.mjs",
-    "scripts/lib/render.mjs",
     "scripts/lib/which.mjs",
     "scripts/lib/providers/claude.mjs",
     "scripts/lib/providers/codex.mjs",
@@ -27,5 +26,5 @@
     "scripts/lib/providers/kiro.mjs",
     "scripts/lib/providers/opencode.mjs"
   ],
-  "digest": "sha256:f8c925a749515f521c70b5b4f7b414e3040df92d8a67345fa58a4af13ddcc0f0"
+  "digest": "sha256:416b776fcb1cd21fa3bc2fae78e62de15e3f1e36f0925844772ba6e0ae53bd2c"
 }

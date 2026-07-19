@@ -1,4 +1,4 @@
-// Complete, byte-safe Git/worktree evidence for both the legacy and v0.2 machine APIs.
+// Complete, byte-safe Git/worktree evidence for the strict machine API.
 // Git output is consumed as NUL-delimited Buffers, so spaces and newlines in names are never split.
 // Fingerprints cover HEAD, the index, tracked worktree bytes, untracked bytes, deletions and symlinks.
 import { spawnSync } from 'node:child_process';
@@ -8,7 +8,6 @@ import {
   constants,
   lstatSync,
   openSync,
-  readFileSync,
   readlinkSync,
   readSync,
 } from 'node:fs';
@@ -164,13 +163,15 @@ function parseStatus(cwd, raw) {
       originalPath = pathText(original);
     }
     const observed = inspectPath(cwd, path);
-    const worktreeMode = kind === 'u' ? '' : (header[5] || '');
+    const statusModes = kind === 'u' ? header.slice(3, 7) : header.slice(3, 6);
     changes.push({
       path: pathText(path), originalPath, tracked: true, untracked: false,
       staged: indexStatus !== '.', unstaged: worktreeStatus !== '.',
       deleted: indexStatus === 'D' || worktreeStatus === 'D',
       renamed: kind === '2' || indexStatus === 'R' || worktreeStatus === 'R',
-      symlink: worktreeMode === '120000' || observed.kind === 'symlink',
+      // Preserve symlink evidence from HEAD/index/worktree modes even when the current worktree
+      // object has already been replaced by a regular file (or deleted).
+      symlink: statusModes.includes('120000') || observed.kind === 'symlink',
       indexStatus, worktreeStatus,
     });
   }
@@ -196,13 +197,6 @@ export function isRepo(cwd) {
 
 export function assertRepo(cwd) {
   if (!isRepo(cwd)) throw new GitEvidenceError(`--cwd '${cwd}' is not a Git worktree`);
-}
-
-// This function deliberately performs the repository check before asking Git for HEAD.
-export function headSha(cwd) {
-  if (!isRepo(cwd)) return null;
-  const result = gitBuffer(cwd, ['rev-parse', '--verify', 'HEAD']);
-  return result.code === 0 ? result.out.toString('utf8').trim() : null;
 }
 
 export function gitFingerprint(cwd) {
@@ -262,15 +256,4 @@ export function compareGitFingerprints(before, after) {
   }
   files.sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   return { changed: before?.digest !== after?.digest, files };
-}
-
-// Backward-compatible helper. New code should compare two fingerprints so pre-existing dirt is not
-// mistaken for provider work. This retains the old baseline API for external imports.
-export function diffStat(cwd, baseline) {
-  if (!baseline || !isRepo(cwd)) return { changed: false, stat: '', files: [] };
-  const root = repositoryRoot(cwd);
-  const names = splitNul(checkedGit(root, ['diff', '--name-only', '-z', baseline], 'git diff names')).map(pathText);
-  const untracked = splitNul(checkedGit(root, ['ls-files', '--others', '--exclude-standard', '-z'], 'git untracked listing')).map(pathText);
-  const files = [...new Set([...names, ...untracked])].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
-  return { changed: files.length > 0, stat: files.map((path) => `changed ${JSON.stringify(path)}`).join('\n'), files };
 }

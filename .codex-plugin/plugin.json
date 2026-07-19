@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.2.1",
-  "description": "Hand off interactive build/review tasks to six providers, plus a strict machine API: coordinator-bound Codex and sandboxed Grok for all roles, Kiro v1 for review/verify only. Prompt bytes stay off argv and every machine result fails closed with Git evidence.",
+  "version": "0.3.0",
+  "description": "Strict machine-only handoff to Codex, Grok, Claude, OpenCode, Cursor, and review-only Kiro. Every slash command uses the same fail-closed ABI with explicit policy preflight, structured results, and Git evidence.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"
@@ -13,11 +13,11 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Handoff",
-    "shortDescription": "Delegate build & review to Codex, Grok, Kiro, Claude, opencode, or Cursor",
-    "longDescription": "Hand off one bounded interactive build or review to another one-shot coding agent, or invoke the strict v0.2 machine ABI. Codex requires coordinator-bound AGENTS.md injection, Grok supports every role under named sandboxes, and Kiro v1 is review/verify-only. Prompt bytes stay off argv and normalized results carry deterministic Git evidence.",
+    "shortDescription": "Strictly delegate build and review through one machine ABI",
+    "longDescription": "Hand off one bounded build, phase, review, or verification through a single strict machine ABI. Codex, Grok, Claude, OpenCode, and Cursor have explicit role policies and fail-closed preflight; Kiro is review/verify-only. Prompt bytes stay off argv and normalized results carry deterministic Git evidence.",
     "developerName": "ulpi.io",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": ["Machine API", "Write"],
     "websiteURL": "https://github.com/ulpi-io/plugin-handoff",
     "defaultPrompt": [
       "Have Codex review the diff in src/auth",

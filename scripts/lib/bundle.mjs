@@ -14,22 +14,21 @@ export const BUNDLE_FILES = Object.freeze([
   'contracts/v0.2/request.schema.json',
   'contracts/v0.2/result.schema.json',
   'scripts/handoff.mjs',
+  'scripts/prepare-request.mjs',
   'scripts/lib/agents-policy.mjs',
   'scripts/lib/bundle.mjs',
   'scripts/lib/contracts.mjs',
   'scripts/lib/git.mjs',
   'scripts/lib/machine.mjs',
   'scripts/lib/paths.mjs',
-  'scripts/lib/prompt.mjs',
   'scripts/lib/provider-preflight.mjs',
-  'scripts/lib/render.mjs',
   'scripts/lib/which.mjs',
   'scripts/lib/providers/claude.mjs',
   'scripts/lib/providers/codex.mjs',
   'scripts/lib/providers/cursor.mjs',
   'scripts/lib/providers/grok.mjs',
   'scripts/lib/providers/kiro.mjs',
-  'scripts/lib/providers/opencode.mjs'
+  'scripts/lib/providers/opencode.mjs',
 ]);
 
 export const BUNDLE_DIGEST_PATH = resolve(root, 'bundle-digest.json');

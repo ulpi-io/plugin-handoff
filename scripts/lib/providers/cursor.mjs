@@ -1,49 +1,176 @@
-// cursor.mjs — adapter for the Cursor Agent CLI (verified against `cursor-agent --help`, 2025.10.28).
-//   headless invoke : cursor-agent -p --output-format text   (prompt read as literal bytes from stdin;
-//                     NO positional prompt — injection-safe. cursor exposes no --prompt-file / --file, so
-//                     stdin is the only safe channel; if cursor ignored stdin the run just fails closed.)
-//   trust lever     : review omits `--force`; build includes it. Cursor documents no-force print mode
-//                     as proposing rather than applying file changes, while installed help also says
-//                     print mode exposes write/bash tools and loads permission config. This compatible
-//                     adapter does not isolate that config or preflight Cursor's command sandbox.
-//                       build   → -p --force  (force-allow writes/shell; verified by the real git diff).
-//                       autonomous → -p --force --approve-mcps (also auto-approve MCP servers).
-//   model : --model   resume : --continue (most recent) / --resume <chatId>
-//   NOTE: no structured-output flag — review findings come back as text; the brief asks for a JSON block.
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+import { ContractError, decodeUtf8 } from '../contracts.mjs';
+import { flagPreflight } from '../provider-preflight.mjs';
 import { locateExecutable } from '../which.mjs';
 
 export const id = 'cursor';
 export const displayName = 'Cursor';
-export const installHint = 'Install the Cursor CLI (`curl https://cursor.com/install -fsS | bash`) and run `cursor-agent login`.';
+export const installHint = 'Install Cursor CLI and authenticate (`cursor-agent login`).';
+export const pipelineRoles = Object.freeze(['build', 'phase', 'review', 'verify']);
+
+function writable(role) {
+  return role === 'build' || role === 'phase';
+}
 
 export function locate() {
   return locateExecutable('cursor-agent', ['~/.local/bin', '~/.cursor/bin', '/opt/homebrew/bin', '/usr/local/bin']);
 }
 
-export function authOk(bin) {
-  // NOTE: never probe with `status`/`whoami` — those START an interactive login flow. Use --version;
-  // a logged-out cursor fails the real run with a nonzero exit (surfaced honestly, never a fake clean).
-  const r = spawnSync(bin, ['--version'], { encoding: 'utf8' });
-  if (r.status !== 0) return { ok: false, hint: 'cursor-agent is installed but not responding; run `cursor-agent login`.' };
-  return { ok: true, note: 'auth is verified by cursor at run time; a logged-out CLI exits nonzero (never a fake clean).' };
+function proveSandbox(bin, cwd, version, canWrite) {
+  const root = mkdtempSync(join(tmpdir(), 'handoff-cursor-preflight-'));
+  const target = join(cwd, `.handoff-cursor-target-probe-${randomUUID()}`);
+  const script = [
+    "const fs = require('node:fs');",
+    "const targetDir = process.argv[1];",
+    "const target = process.argv[2];",
+    "let targetRead = false; let targetWrite = false;",
+    "try { process.chdir(targetDir); fs.readdirSync('.'); targetRead = true; } catch {}",
+    "try { fs.writeFileSync(target, 'probe'); targetWrite = true; } catch {}",
+    "process.stdout.write(JSON.stringify({ targetRead, targetWrite }));",
+  ].join(' ');
+  try {
+    const probe = spawnSync(bin, [
+      'sandbox', 'run', '--sandbox', canWrite ? '--allow-paths' : '--readonly-paths', cwd,
+      process.execPath, '-e', script, cwd, target,
+    ], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        HANDOFF_CURSOR_EXPECT_WRITE: canWrite ? '1' : '0',
+        HANDOFF_CURSOR_SANDBOX_PROBE: '1',
+        NO_COLOR: '1',
+        TERM: 'dumb',
+      },
+    });
+    let observed = null;
+    try { observed = JSON.parse(probe.stdout); } catch { /* fail below */ }
+    const targetExists = existsSync(target);
+    if (probe.error || probe.status !== 0 || observed?.targetRead !== true
+      || observed?.targetWrite !== canWrite || targetExists !== canWrite) {
+      return {
+        ok: false,
+        version,
+        reason: `installed CLI cannot prove ${canWrite ? 'writable' : 'read-only'} target-path sandbox enforcement${probe.error ? `: ${probe.error.message}` : ''}`,
+      };
+    }
+    return { ok: true, version, reason: null };
+  } finally {
+    rmSync(target, { force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
-export function supportsResume() { return true; }
-
-export function invocation({ verb, model, mode, resume }) {
-  const args = ['-p', '--output-format', 'text'];
-  // build force-allows writes/shell; autonomous does too (bypass unlocked regardless of verb).
-  if (verb === 'build' || mode === 'autonomous') args.push('--force');
-  if (mode === 'autonomous') args.push('--approve-mcps'); // extra bypass — autonomous ONLY
-  if (model) args.push('--model', model);
-  if (resume) { if (typeof resume === 'string') args.push('--resume', resume); else args.push('--continue'); }
-  const trustNote = mode === 'autonomous' ? '--force --approve-mcps'
-    : verb === 'build' ? '--force'
-    : '-p without --force (configuration-dependent; mutation checked by Git evidence)';
-  return { bin: locate(), args, stdin: 'file', trustNote }; // brief piped to stdin, never on argv
+export function pipelinePreflight(bin, { cwd = process.cwd(), role = null, roles = null } = {}) {
+  const flags = flagPreflight(bin, {
+    helpArgs: ['--help'],
+    requiredFlags: ['--force', '--output-format', '--print'],
+  });
+  if (!flags.ok) return flags;
+  if (cwd.includes(',')) {
+    return { ok: false, version: flags.version, reason: 'Cursor sandbox path flags cannot safely encode a cwd containing a comma' };
+  }
+  const sandboxHelp = spawnSync(bin, ['sandbox', 'run', '--help'], {
+    encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+  });
+  const help = `${sandboxHelp.stdout || ''}\n${sandboxHelp.stderr || ''}`;
+  const missing = ['--allow-paths', '--network', '--readonly-paths', '--sandbox'].filter((flag) => !help.includes(flag));
+  if (sandboxHelp.error || sandboxHelp.status !== 0 || missing.length) {
+    return {
+      ok: false,
+      version: flags.version,
+      reason: sandboxHelp.error
+        ? `sandbox capability probe failed: ${sandboxHelp.error.message}`
+        : missing.length ? `installed CLI lacks required sandbox flag(s): ${missing.join(', ')}` : `sandbox capability probe failed: exit ${sandboxHelp.status}`,
+    };
+  }
+  const checkedRoles = role
+    ? [role]
+    : [...new Set((roles || pipelineRoles).map((entry) => writable(entry) ? 'build' : 'review'))];
+  for (const checkedRole of checkedRoles) {
+    const proof = proveSandbox(bin, cwd, flags.version, writable(checkedRole));
+    if (!proof.ok) return proof;
+  }
+  return flags;
 }
 
-export function capture({ code, stdout, stderr }) {
-  return { ran: true, ok: code === 0, text: (stdout || '').trim(), stderr: (stderr || '').trim() };
+export function pipelinePolicy(role) {
+  const canWrite = writable(role);
+  return {
+    enforcement: 'native-command-sandbox',
+    filesystem: canWrite ? 'target-worktree-write' : 'target-worktree-read-only',
+    approvals: canWrite ? 'force applies changes inside the sandbox' : 'force omitted',
+    ephemeral: false,
+    userConfiguration: 'isolated with temporary HOME and XDG roots',
+    projectRules: 'provider-native rules may be read',
+    nativeFilesystemIsolation: true,
+    sandboxProfile: canWrite ? 'workspace_readwrite plus writable target path' : 'workspace_readwrite plus read-only target path',
+    fileToolConfinement: canWrite ? 'target worktree is an explicit writable path' : 'target worktree is an explicit read-only path; mutation detection is defense in depth',
+    network: 'enabled for the provider process and its sandboxed children',
+    structuredResult: 'single Cursor JSON envelope containing one strict provider object',
+    applyMode: canWrite ? 'force' : 'force-omitted-native-read-only',
+    providerState: 'local HOME and XDG state are temporary; remote provider retention is provider-defined',
+  };
+}
+
+export function pipelineInvocation({ bin, role, cwd, tempRoot, model }) {
+  if (cwd.includes(',')) throw new Error('Cursor sandbox path flags cannot safely encode a cwd containing a comma');
+  const policy = pipelinePolicy(role);
+  const sandboxRoot = join(tempRoot, 'cursor-sandbox');
+  const home = join(sandboxRoot, 'home');
+  for (const path of [sandboxRoot, home, join(home, 'config'), join(home, 'cache'), join(home, 'state'), join(home, 'data')]) {
+    mkdirSync(path, { recursive: true });
+  }
+  const nested = [bin, '-p', '--output-format', 'json'];
+  if (writable(role)) nested.push('--force');
+  if (model) nested.push('--model', model);
+  const args = [
+    'sandbox', 'run', '--sandbox', '--network',
+    writable(role) ? '--allow-paths' : '--readonly-paths', cwd,
+    '/usr/bin/env', '-C', cwd, ...nested,
+  ];
+  return {
+    bin,
+    args,
+    cwd: sandboxRoot,
+    env: {
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, 'config'),
+      XDG_CACHE_HOME: join(home, 'cache'),
+      XDG_STATE_HOME: join(home, 'state'),
+      XDG_DATA_HOME: join(home, 'data'),
+    },
+    stdin: 'prompt',
+    resultSource: { type: 'stdout' },
+    policy,
+  };
+}
+
+export function pipelineExtractResult(raw) {
+  let envelope;
+  const text = decodeUtf8(raw, 'Cursor output', 'invalid_provider_output');
+  try { envelope = JSON.parse(text); }
+  catch { throw new ContractError('Cursor output must be exactly one JSON envelope', 'invalid_provider_output'); }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
+    || envelope.type !== 'result' || envelope.subtype !== 'success' || envelope.is_error !== false
+    || typeof envelope.result !== 'string') {
+    throw new ContractError('Cursor returned a malformed or error result envelope', 'invalid_provider_output');
+  }
+  return { bytes: Buffer.from(envelope.result.trim()), usage: null, usageSource: null };
+}
+
+export function pipelineRuntimeCheck({ stdout, stderr }) {
+  const text = `${stdout || ''}\n${stderr || ''}`;
+  if (/sandbox.{0,200}(failed|unable|unavailable|unsupported|continu(e|ing) without|could not be applied|disabled)/iu.test(text)) {
+    return { ok: false, reason: 'Cursor reported that its requested command sandbox was not enforced' };
+  }
+  return { ok: true, reason: null };
 }

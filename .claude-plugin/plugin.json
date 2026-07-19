@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.2.1",
-  "description": "Hand off interactive build/review tasks to six providers, plus a strict machine API: coordinator-bound Codex and sandboxed Grok for all roles, Kiro v1 for review/verify only. Prompt bytes stay off argv and every machine result fails closed with Git evidence.",
+  "version": "0.3.0",
+  "description": "Strict machine-only handoff to Codex, Grok, Claude, OpenCode, Cursor, and review-only Kiro. Every slash command uses the same fail-closed ABI with explicit policy preflight, structured results, and Git evidence.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"

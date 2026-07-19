@@ -7,8 +7,8 @@
   "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "provider", "role", "policy", "requestHash", "status", "exit", "output", "git", "timing", "usage", "diagnostics"],
   "properties": {
     "schemaVersion": { "const": "handoff.result.v0.2" },
-    "driverVersion": { "const": "0.2.1" },
-    "bundleVersion": { "const": "0.2.1" },
+    "driverVersion": { "const": "0.3.0" },
+    "bundleVersion": { "const": "0.3.0" },
     "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "provider": {
       "type": "object",
@@ -31,6 +31,7 @@
         "approvals": { "type": "string" },
         "ephemeral": { "type": "boolean" },
         "userConfiguration": { "type": "string" },
+        "managedConfiguration": { "type": "string" },
         "projectRules": { "type": "string" },
         "nativeAgentsLoading": { "type": "string" },
         "execPolicyRules": { "type": "string" },
@@ -52,7 +53,12 @@
         "readScope": { "type": "string" },
         "writableLocations": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "nativeFilesystemIsolation": { "type": "boolean" },
-        "toolAllowlist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        "nativeBashSandbox": { "type": "boolean" },
+        "fileToolConfinement": { "type": "string" },
+        "toolAllowlist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "structuredResult": { "type": "string" },
+        "providerState": { "type": "string" },
+        "applyMode": { "type": "string" }
       }
     },
     "requestHash": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
@@ -105,7 +111,7 @@
       "additionalProperties": false,
       "required": ["source", "inputTokens", "outputTokens", "totalTokens"],
       "properties": {
-        "source": { "enum": ["provider-output", "not-reported", "not-observed"] },
+        "source": { "enum": ["provider-output", "provider-envelope", "not-reported", "not-observed"] },
         "inputTokens": { "type": ["integer", "null"], "minimum": 0 },
         "outputTokens": { "type": ["integer", "null"], "minimum": 0 },
         "totalTokens": { "type": ["integer", "null"], "minimum": 0 }

@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
 
-export const DRIVER_VERSION = '0.2.1';
-export const BUNDLE_VERSION = '0.2.1';
+export const DRIVER_VERSION = '0.3.0';
+export const BUNDLE_VERSION = '0.3.0';
 export const CAPABILITIES_SCHEMA_VERSION = 'handoff.capabilities.v0.2';
 export const REQUEST_SCHEMA_VERSION = 'handoff.request.v0.2';
 export const PROVIDER_OUTPUT_SCHEMA_VERSION = 'handoff.provider-output.v0.2';
@@ -15,6 +16,9 @@ export const PIPELINE_PROVIDER_ROLES = Object.freeze({
   codex: Object.freeze(['build', 'phase', 'review', 'verify']),
   grok: Object.freeze(['build', 'phase', 'review', 'verify']),
   kiro: Object.freeze(['review', 'verify']),
+  claude: Object.freeze(['build', 'phase', 'review', 'verify']),
+  opencode: Object.freeze(['build', 'phase', 'review', 'verify']),
+  cursor: Object.freeze(['build', 'phase', 'review', 'verify']),
 });
 export const PIPELINE_PROVIDERS = Object.freeze(Object.keys(PIPELINE_PROVIDER_ROLES));
 export const DEFAULT_TIMEOUT_MS = 600_000;
@@ -22,6 +26,7 @@ export const MAX_REQUEST_BYTES = 2_000_000;
 export const MAX_PROVIDER_OUTPUT_BYTES = 256_000;
 export const MAX_CAPTURE_BYTES = 1_048_576;
 export const MAX_DIAGNOSTIC_BYTES = 8_192;
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const PROVIDER_OUTPUT_SCHEMA_PATH = resolve(here, '../../contracts/v0.2/provider-output.schema.json');
@@ -37,6 +42,11 @@ export class ContractError extends Error {
 
 export function sha256(value) {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+export function decodeUtf8(value, where, code = 'invalid_contract') {
+  try { return strictUtf8.decode(Buffer.isBuffer(value) ? value : Buffer.from(value)); }
+  catch { throw new ContractError(`${where} is not valid UTF-8`, code); }
 }
 
 function plainObject(value, where) {
@@ -163,7 +173,8 @@ export function parseMachineRequest(raw) {
   if (raw.length === 0) throw new ContractError('request file is empty');
   if (raw.length > MAX_REQUEST_BYTES) throw new ContractError(`request file exceeds ${MAX_REQUEST_BYTES} bytes`);
   let value;
-  try { value = JSON.parse(raw.toString('utf8')); }
+  const text = decodeUtf8(raw, 'request file');
+  try { value = JSON.parse(text); }
   catch { throw new ContractError('request file is not valid JSON'); }
   plainObject(value, 'request');
   exactKeys(
@@ -202,7 +213,8 @@ function parseProviderOutputUnchecked(raw) {
     throw new ContractError(`provider output exceeds ${MAX_PROVIDER_OUTPUT_BYTES} bytes`, 'invalid_provider_output');
   }
   let value;
-  try { value = JSON.parse(raw.toString('utf8')); }
+  const text = decodeUtf8(raw, 'provider output', 'invalid_provider_output');
+  try { value = JSON.parse(text); }
   catch { throw new ContractError('provider output must be exactly one JSON object with no prose or noise', 'invalid_provider_output'); }
   plainObject(value, 'provider output');
   exactKeys(

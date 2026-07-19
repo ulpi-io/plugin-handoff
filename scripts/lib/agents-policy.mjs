@@ -1,4 +1,5 @@
 import { lstatSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 
@@ -9,7 +10,9 @@ import { safeCwd } from './paths.mjs';
 const MAX_RULES = 128;
 const MAX_RULE_BYTES = 256_000;
 const MAX_TOTAL_RULE_BYTES = 1_000_000;
-const utf8 = new TextDecoder('utf-8', { fatal: true });
+// Preserve an optional BOM in the decoded content so the approval content hashes back to the exact
+// bytes the coordinator inspected.
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const RULE_FILENAMES = Object.freeze(['AGENTS.override.md', 'AGENTS.md']);
 const APPROVAL_SUBJECT_SCHEMA_VERSION = 'handoff.coordinator-subject.v0.2';
 
@@ -32,7 +35,7 @@ function directoryChain(root, cwd) {
   return directories;
 }
 
-function readRule(absolute, path) {
+function readRule(absolute, path, source = 'repository') {
   let stat;
   try { stat = lstatSync(absolute); }
   catch (error) {
@@ -51,7 +54,18 @@ function readRule(absolute, path) {
   catch { throw new ContractError(`applicable AGENTS.md rule '${path}' is not valid UTF-8`); }
   // Codex skips empty guidance and continues to the next filename at this directory level.
   if (!content.trim()) return null;
-  return { source: 'repository', path, sha256: sha256(bytes), content };
+  return { source, path, sha256: sha256(bytes), content };
+}
+
+export function discoverCodexGlobalAgentsRules() {
+  const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex');
+  if (!isAbsolute(codexHome)) throw new ContractError('CODEX_HOME must be absolute for coordinator rule binding');
+  for (const filename of RULE_FILENAMES) {
+    const absolute = join(codexHome, filename);
+    const rule = readRule(absolute, absolute, 'external');
+    if (rule) return [rule];
+  }
+  return [];
 }
 
 export function discoverAgentsRules(cwd) {
@@ -72,6 +86,11 @@ export function discoverAgentsRules(cwd) {
   }
   if (rules.length > MAX_RULES) throw new ContractError(`applicable AGENTS.md rule count exceeds ${MAX_RULES}`);
   return rules;
+}
+
+export function discoverCoordinatorAgentsRules(cwd) {
+  return [...discoverCodexGlobalAgentsRules(), ...discoverAgentsRules(cwd)]
+    .sort((left, right) => Buffer.compare(Buffer.from(`${left.source}\0${left.path}`), Buffer.from(`${right.source}\0${right.path}`)));
 }
 
 function approvalSubject(request, approval, role, cwd) {

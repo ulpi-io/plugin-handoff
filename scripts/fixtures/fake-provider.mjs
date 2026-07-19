@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Hermetic fake for the real pipeline subprocess boundary. Tests copy this file to a temporary
-// PATH as codex, grok, or kiro-cli; it never reads provider/global configuration or uses network.
+// Hermetic executable for every provider adapter. It exercises real argv/stdin/stdout/file/process
+// boundaries without network, authentication, provider state, or global configuration.
 import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
@@ -9,6 +9,13 @@ const executable = basename(process.argv[1]);
 
 if (process.env.HANDOFF_FAKE_ANY_INVOKE_MARKER) {
   writeFileSync(process.env.HANDOFF_FAKE_ANY_INVOKE_MARKER, 'invoked\n');
+}
+if (process.env.HANDOFF_FAKE_INVOCATION_CAPTURE) {
+  writeFileSync(process.env.HANDOFF_FAKE_INVOCATION_CAPTURE, JSON.stringify({
+    executable,
+    args,
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('OPENCODE_') || key.startsWith('XDG_'))),
+  }));
 }
 
 function has(flag) { return args.includes(flag); }
@@ -27,13 +34,15 @@ if (has('--help') || has('-h')) {
     process.stdout.write('--sandbox\n');
     process.exit(0);
   }
-  process.stdout.write([
-    '--config --strict-config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules',
-    '--output-schema --output-last-message',
-    '--cwd --disable-web-search --json-schema --max-turns --no-memory --no-subagents',
-    '--permission-mode --prompt-file --verbatim',
-    '--no-interactive --trust-tools --wrap',
-  ].join('\n') + '\n');
+  const help = {
+    codex: '--config --strict-config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules --output-schema --output-last-message',
+    grok: '--cwd --disable-web-search --json-schema --max-turns --no-memory --no-subagents --permission-mode --prompt-file --sandbox --verbatim',
+    'kiro-cli': '--no-interactive --trust-tools --wrap',
+    claude: '--allowedTools --bare --disable-slash-commands --json-schema --mcp-config --no-chrome --no-session-persistence --output-format --permission-mode --safe-mode --settings --strict-mcp-config --tools',
+    opencode: args.includes('run') ? '--agent --dir --format' : '--pure',
+    'cursor-agent': args.includes('sandbox') ? '--allow-paths --network --readonly-paths --sandbox' : '--force --output-format --print',
+  }[executable];
+  process.stdout.write(`${help || ''}\n`);
   process.exit(0);
 }
 
@@ -54,6 +63,23 @@ if (args.includes('handoff-invalid-json')) {
   process.exit(1);
 }
 
+if (args.includes('debug') && args.includes('config')) {
+  if (process.env.HANDOFF_FAKE_MODE === 'policy-missing') {
+    process.stdout.write(JSON.stringify({ agent: {} }));
+  } else {
+    process.stdout.write(process.env.OPENCODE_CONFIG_CONTENT || '{}');
+  }
+  process.exit(0);
+}
+
+if (process.env.HANDOFF_CURSOR_SANDBOX_PROBE === '1') {
+  const expectedWrite = process.env.HANDOFF_CURSOR_EXPECT_WRITE === '1';
+  const targetWrite = process.env.HANDOFF_FAKE_MODE === 'sandbox-missing' ? !expectedWrite : expectedWrite;
+  if (targetWrite) writeFileSync(args.at(-1), 'probe');
+  process.stdout.write(JSON.stringify({ targetRead: true, targetWrite }));
+  process.exit(0);
+}
+
 async function stdinText() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
@@ -69,7 +95,7 @@ if (process.env.HANDOFF_FAKE_PROMPT_CAPTURE) {
 }
 
 const role = prompt.match(/machine role '([^']+)'/u)?.[1] || 'review';
-const cwd = after('--cd') || after('--cwd') || process.cwd();
+const cwd = after('--cd') || after('--cwd') || after('--dir') || after('-C') || process.cwd();
 const mode = process.env.HANDOFF_FAKE_MODE || 'success';
 let changedPath = null;
 
@@ -105,7 +131,6 @@ const output = {
 };
 
 let serialized = JSON.stringify(output);
-if (mode === 'noisy') serialized = `provider noise\n${serialized}`;
 if (mode === 'prose') serialized = 'Everything looks good.';
 if (mode === 'oversized') serialized = JSON.stringify({ ...output, summary: 'x'.repeat(300_000) });
 if (mode === 'schema-drift') serialized = JSON.stringify({ ...output, schemaVersion: 'handoff.provider-output.v9' });
@@ -122,10 +147,49 @@ if (mode === 'runtime-sandbox-missing') {
   process.stderr.write('warning: sandbox could not be applied; refusing to start rather than run unsandboxed\n');
 }
 
+function providerStdout() {
+  if (executable === 'claude') {
+    let structuredOutput;
+    try { structuredOutput = JSON.parse(serialized); }
+    catch { structuredOutput = null; }
+    const envelope = JSON.stringify({
+      type: 'result',
+      is_error: false,
+      result: serialized,
+      structured_output: structuredOutput,
+      usage: { input_tokens: 11, output_tokens: 7 },
+    });
+    return mode === 'noisy' ? `provider noise\n${envelope}` : envelope;
+  }
+  if (executable === 'cursor-agent') {
+    const envelope = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, duration_ms: 5,
+      result: serialized, session_id: 'fake-cursor-session',
+    });
+    return mode === 'noisy' ? `provider noise\n${envelope}` : envelope;
+  }
+  if (executable === 'opencode') {
+    const events = [
+      { type: 'step_start', timestamp: 1, sessionID: 'fake-opencode-session', part: { type: 'step-start' } },
+      { type: 'text', timestamp: 2, sessionID: 'fake-opencode-session', part: { type: 'text', text: serialized, time: { end: 2 } } },
+      { type: 'step_finish', timestamp: 3, sessionID: 'fake-opencode-session', part: { type: 'step-finish', tokens: { input: 11, output: 7 } } },
+    ];
+    const stream = events.map((event) => JSON.stringify(event)).join('\n') + '\n';
+    return mode === 'noisy' ? `provider noise\n${stream}` : stream;
+  }
+  return mode === 'noisy' ? `provider noise\n${serialized}` : serialized;
+}
+
 const resultFile = after('--output-last-message');
 if (mode !== 'missing') {
-  if (resultFile) writeFileSync(resultFile, serialized);
-  else process.stdout.write(serialized);
+  if (mode === 'invalid-utf8') {
+    const valid = Buffer.from(serialized);
+    const summaryStart = valid.indexOf(Buffer.from('"summary":"')) + Buffer.byteLength('"summary":"');
+    const invalid = Buffer.concat([valid.subarray(0, summaryStart), Buffer.from([0xff]), valid.subarray(summaryStart + 1)]);
+    if (resultFile) writeFileSync(resultFile, invalid);
+    else process.stdout.write(invalid);
+  } else if (resultFile) writeFileSync(resultFile, mode === 'noisy' ? `provider noise\n${serialized}` : serialized);
+  else process.stdout.write(providerStdout());
 }
 
 process.exit(mode === 'exit' ? Number(process.env.HANDOFF_FAKE_EXIT || 23) : 0);

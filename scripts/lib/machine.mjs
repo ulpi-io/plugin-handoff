@@ -39,11 +39,6 @@ import {
 } from './paths.mjs';
 
 const PROVIDERS = { codex, grok, kiro, claude, opencode, cursor };
-const INTERACTIVE_ONLY_REASONS = Object.freeze({
-  claude: 'interactive-only: handoff has no v0.2 adapter/preflight for Claude bare-mode, configuration, tool, sandbox, and schema-output controls',
-  opencode: 'interactive-only: handoff has no v0.2 adapter/preflight that isolates merged configuration, pins permissions, and normalizes raw JSON events',
-  cursor: 'interactive-only: handoff has no v0.2 adapter/preflight that isolates configuration, proves the requested sandbox/permission policy, and validates a strict provider result',
-});
 
 export const MACHINE_EXIT = Object.freeze({
   OK: 0,
@@ -100,19 +95,10 @@ export function parseMachineCli(argv) {
 }
 
 function capabilityFor(id, adapter) {
-  const pipelineSafe = PIPELINE_PROVIDERS.includes(id);
-  if (!pipelineSafe) {
-    return {
-      id,
-      interactive: true,
-      pipeline: { safe: false, roles: [], reason: INTERACTIVE_ONLY_REASONS[id], preflight: null },
-    };
-  }
   const bin = adapter.locate();
-  const preflight = adapter.pipelinePreflight(bin);
+  const preflight = adapter.pipelinePreflight(bin, { roles: adapter.pipelineRoles });
   return {
     id,
-    interactive: true,
     pipeline: {
       safe: true,
       roles: [...adapter.pipelineRoles],
@@ -206,6 +192,10 @@ function providerPrompt(role, instructions, coordinatorApproval = null) {
     `You are executing the Handoff v0.2 machine role '${role}'.`,
     'Return exactly one JSON object matching the supplied provider-output schema.',
     'Do not wrap the object in Markdown and do not emit prose before or after it.',
+    'The complete required provider-output JSON Schema is:',
+    '<handoff-provider-output-json-schema>',
+    JSON.stringify(PROVIDER_OUTPUT_SCHEMA),
+    '</handoff-provider-output-json-schema>',
   ];
   if (coordinatorApproval) {
     lines.push(
@@ -284,7 +274,7 @@ async function spawnProvider(invocation, { cwd, prompt, timeoutMs }) {
 
     try {
       child = spawn(invocation.bin, invocation.args, {
-        cwd,
+        cwd: invocation.cwd || cwd,
         env: { ...process.env, ...(invocation.env || {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
@@ -363,7 +353,7 @@ export async function executeMachineRun(options) {
 
     const adapter = PROVIDERS[options.provider];
     const bin = adapter.locate();
-    const preflight = adapter.pipelinePreflight(bin);
+    const preflight = adapter.pipelinePreflight(bin, { cwd, role: options.role });
     result.provider.version = preflight.version;
     if (!preflight.ok) throw new MachineError(preflight.reason, MACHINE_EXIT.PROVIDER_UNAVAILABLE, 'not_run');
     assertNotCancelled();
@@ -381,6 +371,7 @@ export async function executeMachineRun(options) {
       bin,
       role: options.role,
       cwd,
+      tempRoot: temp,
       promptFile,
       schemaFile,
       schemaJson,
@@ -441,13 +432,25 @@ export async function executeMachineRun(options) {
       } else {
         providerBytes = processResult.stdout;
       }
+      let observedUsage = null;
+      let usageSource = null;
+      if (typeof adapter.pipelineExtractResult === 'function') {
+        const extracted = adapter.pipelineExtractResult(providerBytes);
+        if (!extracted || !Buffer.isBuffer(extracted.bytes)) {
+          throw new ContractError('provider result normalizer returned an invalid payload', 'invalid_provider_output');
+        }
+        providerBytes = extracted.bytes;
+        observedUsage = extracted.usage ?? null;
+        usageSource = extracted.usageSource ?? null;
+      }
       const parsed = parseProviderOutput(providerBytes);
       result.output = { summary: parsed.summary, evidence: parsed.evidence, findings: parsed.findings };
+      const usage = observedUsage ?? parsed.usage;
       result.usage = {
-        source: Object.keys(parsed.usage).length ? 'provider-output' : 'not-reported',
-        inputTokens: parsed.usage.inputTokens ?? null,
-        outputTokens: parsed.usage.outputTokens ?? null,
-        totalTokens: parsed.usage.totalTokens ?? null,
+        source: Object.keys(usage).length ? (usageSource || 'provider-output') : 'not-reported',
+        inputTokens: usage.inputTokens ?? null,
+        outputTokens: usage.outputTokens ?? null,
+        totalTokens: usage.totalTokens ?? null,
       };
       if (processResult.code !== 0 || parsed.status === 'failed') {
         result.status = 'failed';

@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -24,6 +25,7 @@ import { sha256 } from './lib/contracts.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(scriptsDir, 'handoff.mjs');
+const PREPARE = resolve(scriptsDir, 'prepare-request.mjs');
 const FAKE = resolve(scriptsDir, 'fixtures/fake-provider.mjs');
 
 function command(cwd, executable, args) {
@@ -44,7 +46,7 @@ function setup() {
   writeFileSync(join(repo, 'seed.txt'), 'seed\n');
   command(repo, 'git', ['add', 'seed.txt']);
   command(repo, 'git', ['commit', '-qm', 'seed']);
-  for (const name of ['codex', 'grok', 'kiro-cli']) {
+  for (const name of ['claude', 'codex', 'cursor-agent', 'grok', 'kiro-cli', 'opencode']) {
     copyFileSync(FAKE, join(bin, name));
     chmodSync(join(bin, name), 0o755);
   }
@@ -112,6 +114,11 @@ function cleanup(ctx) {
   rmSync(ctx.root, { recursive: true, force: true });
 }
 
+function valueAfter(args, flag) {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
+}
+
 async function waitForFile(path, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -143,7 +150,7 @@ for (const role of ['build', 'phase', 'review', 'verify']) {
   });
 }
 
-test('capabilities --json is a one-object fake-provider preflight with honest pipeline advertising', () => {
+test('capabilities --json preflights every advertised provider through one strict API', () => {
   const ctx = setup();
   try {
     const proc = spawnSync(process.execPath, [DRIVER, 'capabilities', '--json'], {
@@ -155,100 +162,204 @@ test('capabilities --json is a one-object fake-provider preflight with honest pi
     const parsed = JSON.parse(proc.stdout);
     assert.equal(parsed.schemaVersion, 'handoff.capabilities.v0.2');
     assert.deepEqual(parsed.roles, ['build', 'phase', 'review', 'verify']);
-    for (const provider of ['codex', 'grok', 'kiro']) {
+    for (const provider of ['claude', 'codex', 'cursor', 'grok', 'kiro', 'opencode']) {
       const capability = parsed.providers.find((entry) => entry.id === provider);
       assert.equal(capability.pipeline.safe, true);
       assert.equal(capability.pipeline.preflight.ok, true);
+      assert.equal(Object.hasOwn(capability, 'interactive'), false);
     }
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'codex').pipeline.roles, ['build', 'phase', 'review', 'verify']);
     assert.equal(parsed.providers.find((entry) => entry.id === 'codex').pipeline.policies.build.coordinatorApprovalRequired, true);
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'grok').pipeline.roles, ['build', 'phase', 'review', 'verify']);
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.roles, ['review', 'verify']);
     assert.deepEqual(Object.keys(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.policies), ['review', 'verify']);
-    for (const provider of ['claude', 'opencode', 'cursor']) {
-      const capability = parsed.providers.find((entry) => entry.id === provider);
-      assert.equal(capability.pipeline.safe, false);
-      assert.match(capability.pipeline.reason, /interactive-only/u);
+    for (const provider of ['claude', 'cursor', 'opencode']) {
+      assert.deepEqual(parsed.providers.find((entry) => entry.id === provider).pipeline.roles, ['build', 'phase', 'review', 'verify']);
     }
-    assert.match(parsed.providers.find((entry) => entry.id === 'opencode').pipeline.reason, /no v0\.2 adapter\/preflight/u);
-    assert.match(parsed.providers.find((entry) => entry.id === 'cursor').pipeline.reason, /no v0\.2 adapter\/preflight/u);
   } finally { cleanup(ctx); }
 });
 
-test('all hardened providers execute through the fake executable boundary', () => {
-  for (const provider of ['codex', 'grok', 'kiro']) {
+const STRICT_ROLE_MATRIX = {
+  claude: ['build', 'phase', 'review', 'verify'],
+  cursor: ['build', 'phase', 'review', 'verify'],
+  grok: ['build', 'phase', 'review', 'verify'],
+  kiro: ['review', 'verify'],
+  opencode: ['build', 'phase', 'review', 'verify'],
+};
+
+for (const [provider, roles] of Object.entries(STRICT_ROLE_MATRIX)) {
+  for (const role of roles) {
+    test(`${provider} ${role} crosses the real strict subprocess boundary`, () => {
+      const ctx = setup();
+      try {
+        const { proc, parsed } = invoke(ctx, { provider, role });
+        assert.equal(proc.status, 0, parsed.diagnostics.message);
+        assert.equal(parsed.status, 'succeeded');
+        assert.equal(parsed.provider.id, provider);
+        assert.equal(parsed.role, role);
+        assert.equal(parsed.git.changed, role === 'build' || role === 'phase');
+        if (provider === 'claude') {
+          assert.equal(parsed.policy.userConfiguration, 'disabled by bare and safe modes');
+          assert.equal(parsed.policy.nativeFilesystemIsolation, false);
+          assert.equal(parsed.policy.nativeBashSandbox, role === 'build' || role === 'phase');
+          assert.equal(parsed.usage.source, 'provider-envelope');
+        }
+        if (provider === 'grok') {
+          assert.equal(parsed.policy.sandboxProfile, role === 'build' || role === 'phase' ? 'workspace' : 'read-only');
+          assert.equal(parsed.policy.webSearch, false);
+        }
+        if (provider === 'kiro') {
+          assert.deepEqual(parsed.policy.toolAllowlist, ['fs_read']);
+          assert.equal(parsed.policy.nativeFilesystemIsolation, false);
+        }
+        if (provider === 'opencode') {
+          assert.equal(parsed.policy.nativeFilesystemIsolation, false);
+          assert.equal(parsed.policy.toolAllowlist.includes('bash'), false);
+          assert.equal(parsed.usage.source, 'provider-envelope');
+        }
+        if (provider === 'cursor') {
+          assert.equal(parsed.policy.nativeFilesystemIsolation, true);
+          assert.equal(parsed.policy.applyMode, role === 'build' || role === 'phase' ? 'force' : 'force-omitted-native-read-only');
+        }
+      } finally { cleanup(ctx); }
+    });
+  }
+}
+
+test('strict adapters launch only their pinned control surfaces', () => {
+  for (const [provider, role] of [
+    ['claude', 'build'], ['claude', 'review'],
+    ['cursor', 'build'], ['cursor', 'review'],
+    ['grok', 'build'], ['grok', 'review'],
+    ['kiro', 'review'], ['opencode', 'build'], ['opencode', 'review'],
+  ]) {
     const ctx = setup();
     try {
-      const { proc, parsed } = invoke(ctx, { provider, role: 'review' });
+      const capture = join(ctx.root, `${provider}-${role}-invocation.json`);
+      const promptCapture = join(ctx.root, `${provider}-${role}-prompt.txt`);
+      const { proc } = invoke(ctx, {
+        provider, role,
+        extraEnv: {
+          HANDOFF_FAKE_INVOCATION_CAPTURE: capture,
+          HANDOFF_FAKE_PROMPT_CAPTURE: promptCapture,
+        },
+      });
       assert.equal(proc.status, 0);
-      assert.equal(parsed.status, 'succeeded');
+      const observed = JSON.parse(readFileSync(capture, 'utf8'));
+      const prompt = readFileSync(promptCapture, 'utf8');
+      assert.match(prompt, /<handoff-provider-output-json-schema>/u);
+      assert.match(prompt, /"const":"handoff\.provider-output\.v0\.2"/u);
+      const { args } = observed;
+      if (provider === 'claude') {
+        for (const flag of [
+          '--bare', '--safe-mode', '--strict-mcp-config', '--disable-slash-commands',
+          '--no-session-persistence', '--no-chrome', '--json-schema',
+        ]) assert.equal(args.includes(flag), true, `Claude omitted ${flag}`);
+        assert.equal(valueAfter(args, '--permission-mode'), 'dontAsk');
+        const settings = JSON.parse(valueAfter(args, '--settings'));
+        assert.equal(settings.sandbox.enabled, true);
+        assert.equal(settings.sandbox.failIfUnavailable, true);
+        assert.equal(settings.sandbox.allowUnsandboxedCommands, false);
+        const tools = valueAfter(args, '--tools').split(',');
+        assert.equal(tools.includes('Bash'), role === 'build');
+        assert.equal(tools.includes('Edit'), role === 'build');
+        assert.equal(tools.includes('Write'), role === 'build');
+      }
+      if (provider === 'cursor') {
+        assert.deepEqual(args.slice(0, 4), ['sandbox', 'run', '--sandbox', '--network']);
+        assert.equal(valueAfter(args, role === 'build' ? '--allow-paths' : '--readonly-paths'), realpathSync(ctx.repo));
+        assert.equal(valueAfter(args, '-C'), realpathSync(ctx.repo));
+        assert.equal(args.includes('--force'), role === 'build');
+        assert.equal(valueAfter(args, '--output-format'), 'json');
+      }
       if (provider === 'grok') {
-        assert.equal(parsed.policy.sandboxProfile, 'read-only');
-        assert.equal(parsed.policy.webSearch, false);
-        assert.equal(parsed.policy.subagents, false);
-        assert.equal(parsed.policy.memory, false);
+        assert.equal(valueAfter(args, '--sandbox'), role === 'build' ? 'workspace' : 'read-only');
+        assert.equal(valueAfter(args, '--permission-mode'), role === 'build' ? 'auto' : 'plan');
+        for (const flag of ['--disable-web-search', '--no-subagents', '--no-memory', '--json-schema']) {
+          assert.equal(args.includes(flag), true, `Grok omitted ${flag}`);
+        }
       }
       if (provider === 'kiro') {
-        assert.deepEqual(parsed.policy.toolAllowlist, ['fs_read']);
-        assert.equal(parsed.policy.nativeFilesystemIsolation, false);
+        assert.equal(args.includes('--trust-tools=fs_read'), true);
+        assert.equal(args.some((arg) => arg.includes('trust-all')), false);
+        assert.equal(args.some((arg) => arg.includes('execute_bash')), false);
+      }
+      if (provider === 'opencode') {
+        assert.equal(args.includes('--pure'), true);
+        assert.equal(valueAfter(args, '--dir'), realpathSync(ctx.repo));
+        assert.equal(valueAfter(args, '--format'), 'json');
+        assert.equal(args.includes('--auto'), false);
+        const permission = JSON.parse(observed.env.OPENCODE_PERMISSION);
+        assert.equal(permission['*'], 'deny');
+        assert.equal(permission.bash, 'deny');
+        assert.equal(permission.external_directory, 'deny');
+        assert.equal(permission.edit, role === 'build' ? 'allow' : 'deny');
+        const config = JSON.parse(observed.env.OPENCODE_CONFIG_CONTENT);
+        assert.deepEqual(config.mcp, {});
+        assert.deepEqual(config.plugin, []);
+        assert.deepEqual(config.instructions, []);
       }
     } finally { cleanup(ctx); }
   }
 });
 
-test('legacy --provider/--verb/--prompt-file interface remains operational', () => {
-  for (const [verb, mode] of [['review', 'success'], ['build', 'untracked']]) {
+test('removed provider/verb interface fails as one machine rejection object', () => {
+  const ctx = setup();
+  try {
+    const promptPath = join(ctx.root, 'brief.md');
+    writeFileSync(promptPath, '# bounded request\n');
+    const proc = spawnSync(process.execPath, [
+      DRIVER, '--provider', 'codex', '--verb', 'review', '--prompt-file', promptPath,
+      '--cwd', ctx.repo,
+    ], { encoding: 'utf8', env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}` } });
+    assert.equal(proc.status, 5);
+    assert.equal(proc.stdout.trim().split('\n').length, 1);
+    const parsed = JSON.parse(proc.stdout);
+    assert.equal(parsed.status, 'rejected');
+    assert.match(parsed.diagnostics.message, /machine command must be/u);
+    assert.match(proc.stderr, /machine command must be/u);
+  } finally { cleanup(ctx); }
+});
+
+test('strict review and build both reject a non-Git cwd before provider launch', () => {
+  for (const role of ['review', 'build']) {
     const ctx = setup();
     try {
-      const promptPath = join(ctx.root, `${verb}-brief.md`);
-      writeFileSync(promptPath, `# ${verb} brief\nStay bounded.\n`);
-      const proc = spawnSync(process.execPath, [
-        DRIVER, '--provider', 'codex', '--verb', verb, '--prompt-file', promptPath,
-        '--cwd', ctx.repo, '--json', ...(verb === 'review' ? ['--structured'] : []),
-      ], {
-        encoding: 'utf8',
-        env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_MODE: mode },
+      const plainCwd = join(ctx.root, 'not-a-repository');
+      mkdirSync(plainCwd);
+      const marker = join(ctx.root, `${role}-provider-invoked`);
+      const run = invoke(ctx, {
+        provider: 'grok', role, runCwd: plainCwd,
+        resultName: `non-git-${role}.json`,
+        extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
       });
-      assert.equal(proc.status, 0, proc.stderr);
-      const parsed = JSON.parse(proc.stdout);
-      assert.equal(parsed.provider, 'codex');
-      assert.equal(parsed.verb, verb);
-      assert.equal(parsed.ok, true);
-      if (verb === 'build') assert.deepEqual(parsed.changedFiles, ['untracked only.txt']);
+      assert.equal(run.proc.status, 5);
+      assert.match(run.parsed.diagnostics.message, /not a Git worktree/u);
+      assert.equal(existsSync(marker), false);
     } finally { cleanup(ctx); }
   }
 });
 
-test('legacy review remains operational outside Git while legacy build remains Git-required', () => {
+test('prepare-request creates the strict file contract and binds Codex repository plus global rules', () => {
   const ctx = setup();
   try {
-    const plainCwd = join(ctx.root, 'not-a-repository');
-    const promptPath = join(ctx.root, 'non-git-review.md');
-    mkdirSync(plainCwd);
-    writeFileSync(promptPath, '# Review this non-Git directory read-only.\n');
-    let proc = spawnSync(process.execPath, [
-      DRIVER, '--provider', 'codex', '--verb', 'review', '--prompt-file', promptPath,
-      '--cwd', plainCwd, '--json', '--structured',
-    ], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_MODE: 'success' },
-    });
+    const codexHome = join(ctx.root, 'codex-home');
+    mkdirSync(codexHome);
+    writeFileSync(join(codexHome, 'AGENTS.md'), 'Global coordinator rule.\n');
+    writeFileSync(join(ctx.repo, 'AGENTS.md'), '\uFEFFRepository coordinator rule.\n');
+    const instructions = join(ctx.root, 'instructions.txt');
+    const requestPath = join(ctx.root, 'prepared-request.json');
+    writeFileSync(instructions, 'Review the bounded fake change.\n');
+    const proc = spawnSync(process.execPath, [
+      PREPARE, '--provider', 'codex', '--role', 'review', '--cwd', ctx.repo,
+      '--instructions', instructions, '--request', requestPath,
+    ], { encoding: 'utf8', env: { ...process.env, CODEX_HOME: codexHome } });
     assert.equal(proc.status, 0, proc.stderr);
-    let parsed = JSON.parse(proc.stdout);
-    assert.equal(parsed.ok, true);
-    assert.equal(parsed.gitBefore, null);
-    assert.equal(parsed.gitAfter, null);
-
-    proc = spawnSync(process.execPath, [
-      DRIVER, '--provider', 'codex', '--verb', 'build', '--prompt-file', promptPath,
-      '--cwd', plainCwd, '--json',
-    ], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_MODE: 'untracked' },
-    });
-    assert.equal(proc.status, 7);
-    parsed = JSON.parse(proc.stdout);
-    assert.match(parsed.message, /not a git repo/u);
+    const prepared = JSON.parse(proc.stdout);
+    assert.equal(prepared.status, 'prepared');
+    const value = JSON.parse(readFileSync(requestPath, 'utf8'));
+    assert.deepEqual(value.coordinatorApproval.rules.map((rule) => rule.source), ['external', 'repository']);
+    assert.match(value.coordinatorApproval.subjectHash, /^sha256:[0-9a-f]{64}$/u);
   } finally { cleanup(ctx); }
 });
 
@@ -396,7 +507,7 @@ test('Codex rejects incomplete or stale coordinator AGENTS.md bindings before pr
   } finally { cleanup(ctx); }
 });
 
-test('Kiro v1 rejects build/phase before request or provider execution', () => {
+test('Kiro rejects build/phase before request or provider execution', () => {
   for (const role of ['build', 'phase']) {
     const ctx = setup();
     try {
@@ -420,7 +531,7 @@ test('Kiro v1 rejects build/phase before request or provider execution', () => {
 });
 
 test('non-Codex providers reject coordinator approval objects before provider preflight', () => {
-  for (const provider of ['grok', 'kiro']) {
+  for (const provider of ['claude', 'cursor', 'grok', 'kiro', 'opencode']) {
     const ctx = setup();
     try {
       const marker = join(ctx.root, `${provider}-approval-provider-invoked`);
@@ -441,7 +552,7 @@ test('non-Codex providers reject coordinator approval objects before provider pr
   }
 });
 
-test('Kiro v1 cannot be upgraded by an unverified confinement receipt', () => {
+test('Kiro cannot be upgraded by an unverified confinement receipt', () => {
   const ctx = setup();
   try {
     const marker = join(ctx.root, 'kiro-provider-invoked');
@@ -497,6 +608,38 @@ for (const [mode, message] of [
   });
 }
 
+test('invalid UTF-8 requests and provider objects fail closed', () => {
+  let ctx = setup();
+  try {
+    const requestPath = join(ctx.root, 'invalid-utf8-request.json');
+    const resultPath = join(ctx.root, 'invalid-utf8-request-result.json');
+    const marker = join(ctx.root, 'invalid-utf8-provider-invoked');
+    writeFileSync(requestPath, Buffer.concat([
+      Buffer.from('{"schemaVersion":"handoff.request.v0.2","instructions":"'),
+      Buffer.from([0xff]),
+      Buffer.from('"}'),
+    ]));
+    const proc = spawnSync(process.execPath, [
+      DRIVER, 'run', '--provider', 'grok', '--role', 'review', '--cwd', ctx.repo,
+      '--request', requestPath, '--result', resultPath,
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(proc.status, 5);
+    assert.match(JSON.parse(proc.stdout).diagnostics.message, /not valid UTF-8/u);
+    assert.equal(existsSync(marker), false);
+  } finally { cleanup(ctx); }
+
+  ctx = setup();
+  try {
+    const run = invoke(ctx, { provider: 'codex', role: 'review', mode: 'invalid-utf8' });
+    assert.equal(run.proc.status, 7);
+    assert.equal(run.parsed.status, 'failed');
+    assert.match(run.parsed.diagnostics.message, /not valid UTF-8/u);
+  } finally { cleanup(ctx); }
+});
+
 test('provider exit code is preserved while driver maps failure to exit 2', () => {
   const ctx = setup();
   try {
@@ -538,6 +681,22 @@ test('installed Grok unable to initialize a named sandbox fails capability prefl
   } finally { cleanup(ctx); }
 });
 
+test('Claude, OpenCode, and Cursor fail closed when their strict preflight proof is unavailable', () => {
+  for (const [provider, mode, message] of [
+    ['claude', 'help-missing', /lacks required flag/u],
+    ['opencode', 'policy-missing', /cannot prove the exact review permission policy/u],
+    ['cursor', 'sandbox-missing', /cannot prove read-only target-path sandbox enforcement/u],
+  ]) {
+    const ctx = setup();
+    try {
+      const run = invoke(ctx, { provider, role: 'review', mode });
+      assert.equal(run.proc.status, 3);
+      assert.equal(run.parsed.status, 'not_run');
+      assert.match(run.parsed.diagnostics.message, message);
+    } finally { cleanup(ctx); }
+  }
+});
+
 test('Grok runtime sandbox loss blocks a provider success after preflight', () => {
   const ctx = setup();
   try {
@@ -548,6 +707,32 @@ test('Grok runtime sandbox loss blocks a provider success after preflight', () =
     assert.equal(parsed.status, 'blocked');
     assert.match(parsed.diagnostics.message, /requested sandbox was not enforced/u);
   } finally { cleanup(ctx); }
+});
+
+test('Claude and Cursor runtime sandbox-loss reports block provider success', () => {
+  for (const provider of ['claude', 'cursor']) {
+    const ctx = setup();
+    try {
+      const run = invoke(ctx, { provider, role: 'review', mode: 'runtime-sandbox-missing' });
+      assert.equal(run.proc.status, 10);
+      assert.equal(run.parsed.status, 'blocked');
+      assert.match(run.parsed.diagnostics.message, /sandbox was not enforced/u);
+    } finally { cleanup(ctx); }
+  }
+});
+
+test('Claude, OpenCode, and Cursor envelope normalization rejects noise and prose', () => {
+  for (const provider of ['claude', 'opencode', 'cursor']) {
+    for (const mode of ['noisy', 'prose']) {
+      const ctx = setup();
+      try {
+        const run = invoke(ctx, { provider, role: 'review', mode });
+        assert.equal(run.proc.status, 7, `${provider} ${mode}`);
+        assert.equal(run.parsed.status, 'failed');
+        assert.match(run.parsed.diagnostics.message, /JSON|missing structured_output|exactly one/u);
+      } finally { cleanup(ctx); }
+    }
+  }
 });
 
 test('timeout kills the subprocess and produces a normalized timed_out result', () => {
@@ -716,6 +901,10 @@ test('Git fingerprint is deterministic and complete for staged, unstaged, delete
     command(ctx.repo, 'git', ['mv', 'rename source.txt', 'renamed target\nline.txt']);
     writeFileSync(join(ctx.repo, 'untracked space\nand newline.txt'), 'untracked\n');
     symlinkSync('seed.txt', join(ctx.repo, 'link to seed'));
+    command(ctx.repo, 'git', ['add', 'link to seed']);
+    unlinkSync(join(ctx.repo, 'link to seed'));
+    writeFileSync(join(ctx.repo, 'link to seed'), 'worktree replaced staged symlink\n');
+    symlinkSync('seed.txt', join(ctx.repo, 'untracked link to seed'));
     const first = gitFingerprint(ctx.repo);
     const second = gitFingerprint(ctx.repo);
     assert.equal(first.digest, second.digest);
@@ -727,6 +916,7 @@ test('Git fingerprint is deterministic and complete for staged, unstaged, delete
     assert.ok(first.changeCounts.renamed >= 1);
     assert.ok(first.changeCounts.untracked >= 2);
     assert.ok(first.changeCounts.symlink >= 1);
+    assert.ok(first.changes.some((entry) => entry.path === 'link to seed' && entry.staged && entry.symlink));
     assert.ok(first.changes.some((entry) => entry.path.includes('\n')));
     writeFileSync(join(ctx.repo, 'untracked space\nand newline.txt'), 'changed bytes\n');
     assert.notEqual(gitFingerprint(ctx.repo).digest, first.digest);
