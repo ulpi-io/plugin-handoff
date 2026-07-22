@@ -1,15 +1,16 @@
-# handoff v0.4.0
+# Handoff
 
-Handoff lets an agent ask another model for read-only advice or delegate a bounded build/review
-through one fail-closed Node entrypoint. It supports Codex, Grok, Kiro, Claude, OpenCode, and Cursor.
+Handoff lets a Claude Code or Codex agent give a bounded task to another AI harness. It can also
+ask another model for a read-only second opinion.
 
-Version 0.4 uses one operation-aware v0.3 contract, model/effort/turn selection receipts, explicit
-Bash/web/MCP grants, and two deliberately separate delegation families: plain handoff and handoff
-with advice. The old v0.2 scripts and contracts are removed.
+Supported targets are Codex, Grok, Kiro, Claude, OpenCode, and Cursor. Handoff uses each target's
+installed CLI and existing login or API-key configuration.
 
-## Installation
+The important choice is whether the worker should be allowed to ask for advice while it works.
 
-Install from the [Ulpi plugin marketplace](https://github.com/ulpi-io/marketplace).
+## Install Handoff
+
+Handoff is published through the [Ulpi plugin marketplace](https://github.com/ulpi-io/marketplace).
 
 ### Claude Code
 
@@ -25,22 +26,219 @@ codex plugin marketplace add ulpi-io/marketplace
 codex plugin add handoff@ulpi
 ```
 
-Each plugin resolves from its own repository. Updating Handoff means pushing to this repository, not
-the marketplace repository.
+Restart the host after installing or updating the plugin so it discovers the current skills and
+commands.
 
-## No global CLI
+Each plugin is installed from its own repository. Handoff updates are published here, not in the
+marketplace repository.
 
-The plugin does not register a global `handoff` executable. Both hosts call the checked-in MJS file:
+## Choose how to delegate
+
+Handoff provides three deliberately separate workflows:
+
+| What you need | Use | What the target may do |
+|---|---|---|
+| A second opinion | `get-advice` | Answer read-only; it may request more read-only advice |
+| A worker that finishes independently | `handoff-<target>` | Complete the assigned task; it cannot call Handoff |
+| A worker that may consult another model | `handoff-<target>-with-advice` | Complete the task and request nested read-only advice |
+
+The `with-advice` form does **not** let a worker delegate more work. Its only nested capability is
+read-only advice. Plain handoff gives the worker no nested Handoff capability at all.
+
+## Skills
+
+Codex exposes the plugin skills under the `handoff` namespace:
+
+| Purpose | Codex skill |
+|---|---|
+| Ask any supported model for advice | `$handoff:get-advice` |
+| Choose the target at runtime | `$handoff:handoff-run` |
+| Choose the target at runtime and allow advice | `$handoff:handoff-run-with-advice` |
+| Hand off to Codex | `$handoff:handoff-codex` |
+| Hand off to Codex with advice | `$handoff:handoff-codex-with-advice` |
+| Hand off to Grok | `$handoff:handoff-grok` |
+| Hand off to Grok with advice | `$handoff:handoff-grok-with-advice` |
+| Hand off to Kiro | `$handoff:handoff-kiro` |
+| Hand off to Kiro with advice | `$handoff:handoff-kiro-with-advice` |
+| Hand off to Claude | `$handoff:handoff-claude` |
+| Hand off to Claude with advice | `$handoff:handoff-claude-with-advice` |
+| Hand off to OpenCode | `$handoff:handoff-opencode` |
+| Hand off to OpenCode with advice | `$handoff:handoff-opencode-with-advice` |
+| Hand off to Cursor | `$handoff:handoff-cursor` |
+| Hand off to Cursor with advice | `$handoff:handoff-cursor-with-advice` |
+
+For example, in Codex:
+
+```text
+$handoff:get-advice Ask Claude to challenge the caching design in this repository.
+
+$handoff:handoff-grok Implement the bounded task described in issue 42 and run its focused tests.
+
+$handoff:handoff-codex-with-advice Build the import flow. The worker may ask another model for
+read-only advice if it gets stuck.
+```
+
+Claude Code also provides direct commands for common build and review handoffs:
+
+| Target | Plain commands | Commands that allow advice |
+|---|---|---|
+| Codex | `/handoff:codex-build`, `/handoff:codex-review` | `/handoff:codex-build-with-advice`, `/handoff:codex-review-with-advice` |
+| Grok | `/handoff:grok-build`, `/handoff:grok-review` | `/handoff:grok-build-with-advice`, `/handoff:grok-review-with-advice` |
+| Kiro | `/handoff:kiro-review` | `/handoff:kiro-review-with-advice` |
+| Claude | `/handoff:claude-build`, `/handoff:claude-review` | `/handoff:claude-build-with-advice`, `/handoff:claude-review-with-advice` |
+| OpenCode | `/handoff:opencode-build`, `/handoff:opencode-review` | `/handoff:opencode-build-with-advice`, `/handoff:opencode-review-with-advice` |
+| Cursor | `/handoff:cursor-build`, `/handoff:cursor-review` | `/handoff:cursor-build-with-advice`, `/handoff:cursor-review-with-advice` |
+
+For example:
+
+```text
+/handoff:codex-review Review the authentication changes for security regressions.
+
+/handoff:grok-build-with-advice Implement the timeline writer fix and run the focused test suite.
+```
+
+## What a worker can be asked to do
+
+Handoff supports four task modes:
+
+| Mode | Meaning | File changes |
+|---|---|---|
+| `build` | Implement a bounded change | Required |
+| `phase` | Complete one bounded implementation phase | Required |
+| `review` | Review code or a plan | Forbidden |
+| `verify` | Check a claim or completed change | Forbidden |
+
+Build and phase only succeed when Handoff observes a Git change. Review, verify, and advice are
+blocked if the supplied worktree changes. Kiro currently supports review and verify only.
+
+## Choose the model, effort, and turn limit
+
+Every workflow accepts provider-specific selection controls:
+
+- `--model` selects an exact model.
+- `--effort` selects a reasoning level supported by that provider.
+- `--max-turns` sets an exact turn limit for Grok and Claude.
+
+Defaults are intentionally conservative:
+
+| Request | Default effort | Default turns |
+|---|---|---|
+| Advice from Codex, Claude, or Kiro | `max` | Claude: 32; others: provider default |
+| Advice from Grok | Provider default | 32 |
+| Advice from OpenCode or Cursor | Provider default | Provider default |
+| Any handoff | Provider default | Grok and Claude: 12; others: provider default |
+
+Handoff never pretends an unsupported control worked. An invalid model, effort, turn limit, or
+permission is rejected before the target launches. Cursor, for example, has no exact effort control.
+
+## Control the worker's tools
+
+The supervising agent can explicitly control the tools exposed to the target:
+
+- Bash access is enabled by default and can be disabled with `--bash false` when the provider
+  supports that restriction.
+- Web search is disabled by default. Enable it with `--web-search true` when the provider supports
+  an exact web-search control.
+- No MCP servers are passed by default. Use `--mcp-config` to provide a specific, private set.
+
+Nested advice can keep or reduce the parent's permissions. It can never gain Bash, web, or MCP
+access that the parent did not have.
+
+Provider controls differ because their CLIs provide different isolation features. See the
+[provider capability matrix](references/providers.md) for the exact boundaries of each target.
+
+## Give a worker access to MCP servers
+
+MCP access is optional and limited to the servers you explicitly provide for that run. Handoff does
+not expose every MCP configured in the supervising agent's environment.
+
+Pass `--mcp-config` an absolute path to a JSON file like this:
+
+```json
+{
+  "schemaVersion": "handoff.mcp.v0.3",
+  "servers": [
+    {
+      "name": "local-docs",
+      "transport": "stdio",
+      "command": "/usr/bin/env",
+      "args": ["node", "/absolute/path/server.mjs"],
+      "env": {
+        "TOKEN": { "fromEnv": "DOCS_MCP_TOKEN" }
+      }
+    },
+    {
+      "name": "remote-search",
+      "transport": "http",
+      "url": "https://mcp.example.com/rpc",
+      "headers": {
+        "Authorization": { "fromEnv": "SEARCH_MCP_AUTH" }
+      }
+    }
+  ]
+}
+```
+
+The file names the environment variables that hold secrets; it does not contain the secret values.
+Handoff keeps those values out of prompts, result files, and command arguments. If a provider cannot
+receive a private MCP configuration safely, the request is rejected instead of falling back to its
+ambient MCP configuration.
+
+## How Handoff keeps delegation bounded
+
+All targets run through the same fail-closed driver:
+
+- The complete task is written to a private instruction file rather than placed in process
+  arguments.
+- Handoff records the caller, target, task mode, chosen model, permissions, and delegation mode.
+- Read-only work is checked for unexpected Git mutations.
+- Build work must produce a Git-observable change.
+- Unsupported settings and invalid provider output fail visibly.
+- A private root lease prevents a worker from stripping its environment and starting a new root
+  handoff.
+- Advice-enabled runs use a temporary supervisor that owns lineage, budgets, and advice-only
+  capabilities. It is removed when the root run ends.
+
+The same-user limitation is explicit: these controls do not defend against a malicious coordinator
+or another process running as the same operating-system user that deliberately tampers with Handoff
+state. Use a container or virtual machine when that process is outside your trust boundary.
+
+## Results and failures
+
+Handoff writes the normalized result to the requested JSON file and prints the same JSON to stdout.
+The main answer is in `output.response`; supporting evidence and findings are separate fields.
+
+A run is successful only when the process exits with code `0` **and** the result status is
+`succeeded`. An empty or failed result must never be reported as "no findings."
+
+Common exit codes are:
+
+| Exit | Meaning |
+|---:|---|
+| `0` | Succeeded |
+| `2` | Provider failed or blocked |
+| `3` | Provider unavailable |
+| `5` | Request rejected |
+| `7` | Provider returned invalid output |
+| `8` | Timed out |
+| `9` | Cancelled |
+| `10` | Policy blocked the request |
+
+The result also includes Git fingerprints, timing, usage, diagnostics, resolved model and permission
+receipts, and the delegation DAG when advice was available.
+
+## Advanced: call the bundled driver directly
+
+Handoff does not install a global `handoff` command. Skills and Claude commands call the bundled
+Node entrypoint:
 
 ```text
 node ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs ...
 ```
 
-Prompt bytes live in a private instruction file, never provider argv.
+Instructions and results must use private absolute paths.
 
-## Get read-only advice
-
-Any supported harness can ask any compatible target harness for advice:
+### Ask for advice
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
@@ -56,16 +254,10 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
   --result /absolute/private/advice-result.json
 ```
 
-Advice is structurally read-only. The answer is `output.response`; evidence and findings remain
-separate arrays. Advice cannot gain write authority even when the target can build. An adviser may
-request further read-only advice, but it cannot launch a handoff.
+Advice is always read-only. It cannot gain write authority even when the selected target also
+supports build work.
 
-`--caller-harness` is explicit root lineage metadata, not authentication. The selected provider
-uses its own native logged-in CLI or API-key precedence.
-
-## Run a plain handoff
-
-A Codex or Claude root can delegate `build`, `phase`, `review`, or `verify`:
+### Run a plain handoff
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
@@ -80,12 +272,7 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
   --result /absolute/private/handoff-result.json
 ```
 
-Plain `run` gives the worker no supervisor context and no way to request nested advice. Select this
-form when the worker must complete independently.
-
-## Run a handoff with advice
-
-Use the separate verb when the worker may consult another model:
+### Run a handoff that allows advice
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run-with-advice \
@@ -97,161 +284,50 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run-with-advice \
   --result /absolute/private/handoff-result.json
 ```
 
-This gives the worker one attenuated capability: nested read-only `advice`. It cannot invoke nested
-`run`, `run-with-advice`, build, phase, review, verify, or any provider CLI directly.
+The worker may then use the same entrypoint with the `advice` operation. It cannot start another
+`run` or `run-with-advice` operation.
 
-| Target | Plain skill | With-advice skill | Claude commands |
-|---|---|---|---|
-| Codex | `$handoff-codex` | `$handoff-codex-with-advice` | build/review, each plain or with-advice |
-| Grok | `$handoff-grok` | `$handoff-grok-with-advice` | build/review, each plain or with-advice |
-| Kiro | `$handoff-kiro` | `$handoff-kiro-with-advice` | review, plain or with-advice |
-| Claude | `$handoff-claude` | `$handoff-claude-with-advice` | build/review, each plain or with-advice |
-| OpenCode | `$handoff-opencode` | `$handoff-opencode-with-advice` | build/review, each plain or with-advice |
-| Cursor | `$handoff-cursor` | `$handoff-cursor-with-advice` | build/review, each plain or with-advice |
+## Advanced: budgets and lineage
 
-`$handoff-run` and `$handoff-run-with-advice` are the advanced generic surfaces. `$get-advice` is
-the standalone read-only consultation surface.
+Advice-enabled roots use these default limits:
 
-Build/phase must produce a Git-observable change. Advice/review/verify block if the supplied
-worktree changes. Only driver exit `0` plus result status `succeeded` is green.
-
-## Nested calls and DAG lineage
-
-Root advice and `run-with-advice` start one temporary supervisor. It owns advice-only capability
-tokens, budgets, lineage, dependency state, and an audit snapshot outside the worktree. Plain `run`
-does not start or expose a supervisor. The supervisor is not a persistent daemon.
-
-```text
-root frontend
-  -> private v0.3 request
-  -> optional ephemeral supervisor (DAG + advice-only capabilities)
-  -> one machine executor
-  -> provider CLI
-       -> authenticated private mailbox for nested advice
-       -> the same supervisor and machine executor
-```
-
-When `HANDOFF_SUPERVISOR_CONTEXT` is present, workers omit caller and root budgets:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
-  --harness codex \
-  --cwd "$(pwd -P)" \
-  --instructions /absolute/private/nested-instructions.txt \
-  --dependency advises:run-123 \
-  --result /absolute/private/nested-result.json
-```
-
-Dependencies are repeatable and typed as `requires:<run-id>`, `advises:<run-id>`, or
-`verifies:<run-id>`. The supervisor derives caller, root, parent, depth, and `advice-only`
-delegation. Workers cannot author those fields, widen parent grants, raise root budgets, repeat an
-ancestor intent, or bypass the machine executor. A private root lease blocks environment-stripped
-root re-entry and direct machine execution. Root Handoffs are serialized per OS user; cancellation
-terminalizes outstanding nodes and removes the mailbox and runtime state.
-
-The same-UID threat model remains explicit: the capability protocol does not defend against a
-compromised coordinator or another process running as the same OS user. Use a container or VM when
-that actor is outside the trust boundary.
-
-## Selection defaults
-
-| Operation/target | Model | Effort | Max turns |
-|---|---|---|---|
-| Advice to Codex, Claude, or Kiro | provider default | `max` | Claude 32; others provider default |
-| Advice to Grok | provider default | provider default | 32 |
-| Advice to OpenCode or Cursor | provider default | provider default | provider default |
-| Handoff to any target | provider default | provider default | Grok/Claude 12; others provider default |
-
-Override with `--model`, `--effort`, and `--max-turns`. Explicit unsupported values reject before
-adapter lookup. Cursor has no exact effort control. Only Grok and Claude expose an exact 1–100 turn
-control.
-
-## Grants and budgets
-
-`--bash true|false` defaults true. `--web-search true|false` defaults false. An omitted
-`--mcp-config` means an empty MCP set. Nested grants can only narrow the parent's resolved grants.
-Unsupported combinations return non-green before provider launch.
-
-Root budgets and defaults are:
-
-| Flag | Default |
+| Limit | Default |
 |---|---:|
-| `--max-depth` | 3 |
-| `--max-nodes` | 16 |
-| `--max-advice-nodes` | 12 |
-| `--max-handoff-nodes` | 4 |
-| `--max-concurrency` | 4 |
-| `--root-timeout-ms` | 1,800,000 |
-| `--timeout-ms` | 600,000 |
+| Nesting depth | 3 |
+| Total DAG nodes | 16 |
+| Advice nodes | 12 |
+| Handoff nodes | 4 |
+| Concurrent nodes | 4 |
+| Root timeout | 30 minutes |
+| Per-node timeout | 10 minutes |
 
-Nested commands cannot set these flags.
+The corresponding flags are `--max-depth`, `--max-nodes`, `--max-advice-nodes`,
+`--max-handoff-nodes`, `--max-concurrency`, `--root-timeout-ms`, and `--timeout-ms`. Nested calls
+cannot change root budgets.
 
-## Private MCP descriptor
+Nested dependencies may be declared as `requires:<run-id>`, `advises:<run-id>`, or
+`verifies:<run-id>`. The supervisor derives the caller, root, parent, depth, and delegation receipt;
+workers cannot author or widen those fields. Root Handoffs are serialized per operating-system user.
 
-`--mcp-config` accepts a strict `handoff.mcp.v0.3` JSON descriptor. It contains environment
-references, not literal secrets:
+## Inspect capabilities
 
-```json
-{
-  "schemaVersion": "handoff.mcp.v0.3",
-  "servers": [
-    {
-      "name": "local-docs",
-      "transport": "stdio",
-      "command": "/usr/bin/env",
-      "args": ["node", "/absolute/path/server.mjs"],
-      "env": { "TOKEN": { "fromEnv": "DOCS_MCP_TOKEN" } }
-    },
-    {
-      "name": "remote-search",
-      "transport": "http",
-      "url": "https://mcp.example.com/rpc",
-      "headers": { "Authorization": { "fromEnv": "SEARCH_MCP_AUTH" } }
-    }
-  ]
-}
-```
-
-The driver identity-checks the source, copies it mode `0600`, hash-binds the server list, translates
-it into an invocation-private provider configuration, and excludes secret bytes from prompts,
-results, and argv. Providers without a proved private configuration surface reject MCP.
-
-## Result contract
-
-v0.3 providers return `handoff.provider-output.v0.3` with `response`, `evidence`, `findings`, and
-`usage`. Handoff normalizes that into `handoff.result.v0.3` with:
-
-- exact request-byte `requestHash` and lineage-independent semantic `intentHash`;
-- caller/target/mode, resolved selection, grant, and `delegation` receipts, and provider policy;
-- `output.response` (advice answer or handoff summary), evidence, and findings;
-- Git before/after fingerprints, timing, usage, exit state, and redacted diagnostics;
-- the supervisor DAG snapshot when available.
-
-Stdout is one compact JSON line and is byte-identical to the newly reserved result file. Driver exits
-are `0` success, `2` provider failure/block, `3` unavailable, `5` rejected input, `7` invalid output,
-`8` timeout, `9` cancellation, and `10` policy block.
-
-Inspect `result.delegation.mode`: plain `run` records `none`; root `advice` and
-`run-with-advice` record `advice-only`; nested advice also records provenance `parent-attenuated`.
-
-## Capability discovery
-
-The current capability contract is:
+Ask the installed driver for its exact current provider support:
 
 ```bash
 node scripts/handoff.mjs capabilities --json
 ```
 
-See [the provider matrix](references/providers.md) for exact controls and isolation boundaries.
+This reports available providers, selection controls, tool grants, isolation guarantees, task
+modes, defaults, and the sealed bundle version.
 
-## Validation
+## Validate a checkout
 
 ```bash
 node scripts/bundle-digest.mjs --check
 node --test scripts/test-release-v04.mjs
 ```
 
-The installed capability suite performs local help/config/sandbox probes only. It makes no model
-call, authenticated web request, or ambient configuration mutation.
+The capability tests inspect local CLI help, configuration, and sandbox behavior. They do not make
+model calls, authenticated web requests, or ambient configuration changes.
 
 MIT · ulpi.io
