@@ -1,4 +1,4 @@
 interface:
-  display_name: "Handoff With Advice"
-  short_description: "Delegate with optional read-only consultation"
+  display_name: "Handoff: Worker Can Ask for Advice"
+  short_description: "Delegate and let the worker ask for advice"
   default_prompt: "Use $handoff-run-with-advice to delegate this bounded task and let the worker request read-only advice."

@@ -3,7 +3,7 @@ name: handoff-codex-with-advice
 description: Delegate a bounded build, phase, review, verify task to Codex while allowing that worker to request nested read-only advice. Use when Codex should execute the task and may consult another model without delegating more work.
 ---
 
-# Hand off to Codex with advice
+# Hand off to Codex and let it ask for advice
 
 Write the complete goal, scope, acceptance criteria, validation commands, and guardrails to a private
 instructions file. Use only this exact root family:

@@ -3,7 +3,7 @@ name: handoff-kiro-with-advice
 description: Delegate a bounded review, verify task to Kiro while allowing that worker to request nested read-only advice. Use when Kiro should execute the task and may consult another model without delegating more work.
 ---
 
-# Hand off to Kiro with advice
+# Hand off to Kiro and let it ask for advice
 
 Write the complete goal, scope, acceptance criteria, validation commands, and guardrails to a private
 instructions file. Use only this exact root family:

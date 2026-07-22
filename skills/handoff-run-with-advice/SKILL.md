@@ -3,7 +3,7 @@ name: handoff-run-with-advice
 description: Delegate one bounded build, phase, review, or verification from Codex or Claude while allowing the worker to request nested read-only advice from supported models. Use only when the worker may benefit from consultation but must not delegate more work.
 ---
 
-# Run a handoff with advice
+# Run a handoff whose worker may ask for advice
 
 Use only the bundled `scripts/handoff.mjs` entrypoint and select `run-with-advice` explicitly:
 

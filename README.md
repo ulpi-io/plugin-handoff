@@ -54,19 +54,19 @@ Claude Code uses `/handoff:<skill>`, while Codex uses `$handoff:<skill>`.
 |---|---|---|
 | Ask any supported model for advice | `/handoff:get-advice` | `$handoff:get-advice` |
 | Choose the target at runtime | `/handoff:handoff-run` | `$handoff:handoff-run` |
-| Choose the target at runtime and allow advice | `/handoff:handoff-run-with-advice` | `$handoff:handoff-run-with-advice` |
+| Choose the target at runtime and let the worker ask for advice | `/handoff:handoff-run-with-advice` | `$handoff:handoff-run-with-advice` |
 | Hand off to Codex | `/handoff:handoff-codex` | `$handoff:handoff-codex` |
-| Hand off to Codex with advice | `/handoff:handoff-codex-with-advice` | `$handoff:handoff-codex-with-advice` |
+| Hand off to Codex; let it ask for advice | `/handoff:handoff-codex-with-advice` | `$handoff:handoff-codex-with-advice` |
 | Hand off to Grok | `/handoff:handoff-grok` | `$handoff:handoff-grok` |
-| Hand off to Grok with advice | `/handoff:handoff-grok-with-advice` | `$handoff:handoff-grok-with-advice` |
+| Hand off to Grok; let it ask for advice | `/handoff:handoff-grok-with-advice` | `$handoff:handoff-grok-with-advice` |
 | Hand off to Kiro | `/handoff:handoff-kiro` | `$handoff:handoff-kiro` |
-| Hand off to Kiro with advice | `/handoff:handoff-kiro-with-advice` | `$handoff:handoff-kiro-with-advice` |
+| Hand off to Kiro; let it ask for advice | `/handoff:handoff-kiro-with-advice` | `$handoff:handoff-kiro-with-advice` |
 | Hand off to Claude | `/handoff:handoff-claude` | `$handoff:handoff-claude` |
-| Hand off to Claude with advice | `/handoff:handoff-claude-with-advice` | `$handoff:handoff-claude-with-advice` |
+| Hand off to Claude; let it ask for advice | `/handoff:handoff-claude-with-advice` | `$handoff:handoff-claude-with-advice` |
 | Hand off to OpenCode | `/handoff:handoff-opencode` | `$handoff:handoff-opencode` |
-| Hand off to OpenCode with advice | `/handoff:handoff-opencode-with-advice` | `$handoff:handoff-opencode-with-advice` |
+| Hand off to OpenCode; let it ask for advice | `/handoff:handoff-opencode-with-advice` | `$handoff:handoff-opencode-with-advice` |
 | Hand off to Cursor | `/handoff:handoff-cursor` | `$handoff:handoff-cursor` |
-| Hand off to Cursor with advice | `/handoff:handoff-cursor-with-advice` | `$handoff:handoff-cursor-with-advice` |
+| Hand off to Cursor; let it ask for advice | `/handoff:handoff-cursor-with-advice` | `$handoff:handoff-cursor-with-advice` |
 
 For example:
 
@@ -128,7 +128,7 @@ Claude Code plugins can ship custom slash commands in addition to shared skills.
 host feature to provide shorter build and review commands. Codex plugins do not have a matching
 custom-command directory, so Codex users invoke the shared skills above instead.
 
-| Target | Plain commands | Commands that allow advice |
+| Target | Plain commands | Commands that let the worker ask for advice |
 |---|---|---|
 | Codex | `/handoff:codex-build`, `/handoff:codex-review` | `/handoff:codex-build-with-advice`, `/handoff:codex-review-with-advice` |
 | Grok | `/handoff:grok-build`, `/handoff:grok-review` | `/handoff:grok-build-with-advice`, `/handoff:grok-review-with-advice` |
@@ -320,7 +320,7 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
   --result /absolute/private/handoff-result.json
 ```
 
-### Run a handoff that allows advice
+### Run a worker that may ask for advice
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run-with-advice \

@@ -1,5 +1,5 @@
 ---
-description: Hand off a review to opencode with optional nested read-only advice.
+description: Hand off a review to OpenCode and let that worker request nested read-only advice.
 argument-hint: "<what to review>"
 allowed-tools: [Bash, Read, Write, Grep, Glob]
 ---

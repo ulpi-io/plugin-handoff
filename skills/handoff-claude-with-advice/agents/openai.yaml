@@ -1,4 +1,4 @@
 interface:
-  display_name: "Claude Handoff With Advice"
-  short_description: "Delegate to Claude with optional advice"
-  default_prompt: "Use $handoff-claude-with-advice to delegate this bounded task to Claude and allow read-only consultation."
+  display_name: "Claude Handoff: Can Ask for Advice"
+  short_description: "Let Claude do the task and ask for advice"
+  default_prompt: "Use $handoff-claude-with-advice to delegate this bounded task to Claude and let that worker ask for read-only advice."

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Grok Handoff With Advice"
-  short_description: "Delegate to Grok with optional advice"
-  default_prompt: "Use $handoff-grok-with-advice to delegate this bounded task to Grok and allow read-only consultation."
+  display_name: "Grok Handoff: Can Ask for Advice"
+  short_description: "Let Grok do the task and ask for advice"
+  default_prompt: "Use $handoff-grok-with-advice to delegate this bounded task to Grok and let that worker ask for read-only advice."

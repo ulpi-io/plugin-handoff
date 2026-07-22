@@ -13,7 +13,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Handoff",
-    "shortDescription": "Choose plain handoff or handoff with advice",
+    "shortDescription": "Delegate independently or let the worker ask for advice",
     "longDescription": "Ask any supported harness for read-only advice, delegate without any nested Handoff authority, or explicitly delegate with an advice-only capability. Every node uses the same current fail-closed MJS authority with pinned model and effort receipts, attenuated Bash/web/MCP grants, bounded lineage, deterministic Git evidence, and structured results.",
     "developerName": "ulpi.io",
     "category": "Developer Tools",

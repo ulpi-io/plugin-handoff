@@ -1,5 +1,5 @@
 ---
-description: Hand off a build to claude with optional nested read-only advice.
+description: Hand off a build to Claude and let that worker request nested read-only advice.
 argument-hint: "<what to build>"
 allowed-tools: [Bash, Read, Write, Grep, Glob]
 disable-model-invocation: true
