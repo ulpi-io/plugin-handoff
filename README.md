@@ -47,29 +47,34 @@ read-only advice. Plain handoff gives the worker no nested Handoff capability at
 
 ## Skills
 
-Codex exposes the plugin skills under the `handoff` namespace:
+Claude Code and Codex receive the same 15 Handoff skills. The only difference is invocation syntax:
+Claude Code uses `/handoff:<skill>`, while Codex uses `$handoff:<skill>`.
 
-| Purpose | Codex skill |
-|---|---|
-| Ask any supported model for advice | `$handoff:get-advice` |
-| Choose the target at runtime | `$handoff:handoff-run` |
-| Choose the target at runtime and allow advice | `$handoff:handoff-run-with-advice` |
-| Hand off to Codex | `$handoff:handoff-codex` |
-| Hand off to Codex with advice | `$handoff:handoff-codex-with-advice` |
-| Hand off to Grok | `$handoff:handoff-grok` |
-| Hand off to Grok with advice | `$handoff:handoff-grok-with-advice` |
-| Hand off to Kiro | `$handoff:handoff-kiro` |
-| Hand off to Kiro with advice | `$handoff:handoff-kiro-with-advice` |
-| Hand off to Claude | `$handoff:handoff-claude` |
-| Hand off to Claude with advice | `$handoff:handoff-claude-with-advice` |
-| Hand off to OpenCode | `$handoff:handoff-opencode` |
-| Hand off to OpenCode with advice | `$handoff:handoff-opencode-with-advice` |
-| Hand off to Cursor | `$handoff:handoff-cursor` |
-| Hand off to Cursor with advice | `$handoff:handoff-cursor-with-advice` |
+| Purpose | Claude Code | Codex |
+|---|---|---|
+| Ask any supported model for advice | `/handoff:get-advice` | `$handoff:get-advice` |
+| Choose the target at runtime | `/handoff:handoff-run` | `$handoff:handoff-run` |
+| Choose the target at runtime and allow advice | `/handoff:handoff-run-with-advice` | `$handoff:handoff-run-with-advice` |
+| Hand off to Codex | `/handoff:handoff-codex` | `$handoff:handoff-codex` |
+| Hand off to Codex with advice | `/handoff:handoff-codex-with-advice` | `$handoff:handoff-codex-with-advice` |
+| Hand off to Grok | `/handoff:handoff-grok` | `$handoff:handoff-grok` |
+| Hand off to Grok with advice | `/handoff:handoff-grok-with-advice` | `$handoff:handoff-grok-with-advice` |
+| Hand off to Kiro | `/handoff:handoff-kiro` | `$handoff:handoff-kiro` |
+| Hand off to Kiro with advice | `/handoff:handoff-kiro-with-advice` | `$handoff:handoff-kiro-with-advice` |
+| Hand off to Claude | `/handoff:handoff-claude` | `$handoff:handoff-claude` |
+| Hand off to Claude with advice | `/handoff:handoff-claude-with-advice` | `$handoff:handoff-claude-with-advice` |
+| Hand off to OpenCode | `/handoff:handoff-opencode` | `$handoff:handoff-opencode` |
+| Hand off to OpenCode with advice | `/handoff:handoff-opencode-with-advice` | `$handoff:handoff-opencode-with-advice` |
+| Hand off to Cursor | `/handoff:handoff-cursor` | `$handoff:handoff-cursor` |
+| Hand off to Cursor with advice | `/handoff:handoff-cursor-with-advice` | `$handoff:handoff-cursor-with-advice` |
 
-For example, in Codex:
+For example:
 
 ```text
+# Claude Code
+/handoff:get-advice Ask Claude to challenge the caching design in this repository.
+
+# Codex
 $handoff:get-advice Ask Claude to challenge the caching design in this repository.
 
 $handoff:handoff-grok Implement the bounded task described in issue 42 and run its focused tests.
@@ -78,7 +83,11 @@ $handoff:handoff-codex-with-advice Build the import flow. The worker may ask ano
 read-only advice if it gets stuck.
 ```
 
-Claude Code also provides direct commands for common build and review handoffs:
+## Claude Code build and review shortcuts
+
+Claude Code plugins can ship custom slash commands in addition to shared skills. Handoff uses that
+host feature to provide shorter build and review commands. Codex plugins do not have a matching
+custom-command directory, so Codex users invoke the shared skills above instead.
 
 | Target | Plain commands | Commands that allow advice |
 |---|---|---|
