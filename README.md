@@ -83,6 +83,45 @@ $handoff:handoff-codex-with-advice Build the import flow. The worker may ask ano
 read-only advice if it gets stuck.
 ```
 
+## Who can ask whom for advice?
+
+The caller and the adviser are independent choices. They may use the same harness or different
+harnesses. Asking the same harness still starts a separate, bounded model process; it does not ask
+the current conversation to answer itself.
+
+| Flow | What the user invokes |
+|---|---|
+| Claude Code asks Claude | `/handoff:get-advice Ask Claude to review this design.` |
+| Codex asks Codex | `$handoff:get-advice Ask Codex to review this design.` |
+| Claude Code asks Codex | `/handoff:get-advice Ask Codex to review this design.` |
+| Codex asks Claude | `$handoff:get-advice Ask Claude to review this design.` |
+
+A delegated worker, such as Grok, can ask for advice only when it was launched with the
+`with-advice` family. For example:
+
+```text
+# From Claude Code
+/handoff:grok-build-with-advice Implement the parser and ask Claude for advice if needed.
+
+# From Codex
+$handoff:handoff-grok-with-advice Implement the parser and ask Claude for advice if needed.
+```
+
+If Grok decides to consult Claude, Handoff has already given it an advice-only supervisor context
+and the exact absolute driver path. Grok invokes the nested equivalent of:
+
+```bash
+node /absolute/path/to/handoff/scripts/handoff.mjs advice \
+  --harness claude \
+  --cwd /absolute/path/to/worktree \
+  --instructions /absolute/private/advice.txt \
+  --result /absolute/private/advice-result.json
+```
+
+The nested command deliberately has no `--caller-harness`: the supervisor knows Grok is the caller.
+It also has no root budget flags. Grok can ask Claude for read-only advice, but it cannot ask Claude
+to invoke a nested build, phase, review, verify, or another handoff operation.
+
 ## Claude Code build and review shortcuts
 
 Claude Code plugins can ship custom slash commands in addition to shared skills. Handoff uses that
