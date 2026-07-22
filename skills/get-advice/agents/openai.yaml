@@ -1,4 +1,4 @@
 interface:
   display_name: "Get Advice"
   short_description: "Ask another harness for bounded expert advice"
-  default_prompt: "Use $get-advice to ask a selected model for a read-only second opinion."
+  default_prompt: "Use $get-advice to ask a selected model for a read-only second opinion with advice-only lineage."

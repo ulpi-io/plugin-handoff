@@ -5,9 +5,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 
 import {
-  COORDINATOR_APPROVAL_SCHEMA_VERSION,
   COORDINATOR_APPROVAL_SCHEMA_VERSION_V03,
-  REQUEST_SCHEMA_VERSION_V03,
   ContractError,
   canonicalJson,
   sha256,
@@ -22,7 +20,6 @@ const MAX_TOTAL_RULE_BYTES = 1_000_000;
 // bytes the coordinator inspected.
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const RULE_FILENAMES = Object.freeze(['AGENTS.override.md', 'AGENTS.md']);
-const APPROVAL_SUBJECT_SCHEMA_VERSION = 'handoff.coordinator-subject.v0.2';
 const APPROVAL_SUBJECT_SCHEMA_VERSION_V03 = 'handoff.coordinator-subject.v0.3';
 
 function repoPath(root, absolute) {
@@ -103,37 +100,17 @@ export function discoverCoordinatorAgentsRules(cwd) {
 }
 
 function approvalSubject(request, approval, role, cwd) {
-  if (request.schemaVersion === REQUEST_SCHEMA_VERSION_V03) {
-    const requestFields = structuredClone(request);
-    delete requestFields.coordinatorApproval;
-    return {
-      schemaVersion: APPROVAL_SUBJECT_SCHEMA_VERSION_V03,
-      approvalId: approval.approvalId,
-      issuer: approval.issuer,
-      provider: approval.provider,
-      role,
-      cwd,
-      scope: approval.scope,
-      requestHash: approval.requestHash,
-      request: requestFields,
-      rules: approval.rules.map(({ source, path, sha256: digest }) => ({ source, path, sha256: digest })),
-    };
-  }
-  const requestFields = {
-    schemaVersion: request.schemaVersion,
-    instructions: request.instructions,
-  };
-  for (const key of ['timeoutMs', 'model', 'effort']) {
-    if (request[key] !== undefined) requestFields[key] = request[key];
-  }
+  const requestFields = structuredClone(request);
+  delete requestFields.coordinatorApproval;
   return {
-    schemaVersion: APPROVAL_SUBJECT_SCHEMA_VERSION,
+    schemaVersion: APPROVAL_SUBJECT_SCHEMA_VERSION_V03,
     approvalId: approval.approvalId,
     issuer: approval.issuer,
     provider: approval.provider,
     role,
     cwd,
     scope: approval.scope,
+    requestHash: approval.requestHash,
     request: requestFields,
     rules: approval.rules.map(({ source, path, sha256: digest }) => ({ source, path, sha256: digest })),
   };
@@ -149,25 +126,20 @@ export function bindCodexCoordinatorApproval({ request, role, cwd, requestHash }
   if (approval.provider !== 'codex') throw new ContractError("request.coordinatorApproval.provider must be 'codex'");
   if (approval.role !== role) throw new ContractError('request.coordinatorApproval.role does not match --role');
   if (safeCwd(approval.cwd) !== cwd) throw new ContractError('request.coordinatorApproval.cwd does not match --cwd');
-  const v03 = request.schemaVersion === REQUEST_SCHEMA_VERSION_V03;
-  if (v03) {
-    if (approval.schemaVersion !== COORDINATOR_APPROVAL_SCHEMA_VERSION_V03) throw new ContractError('v0.3 request requires a v0.3 coordinator approval');
-    const unsigned = structuredClone(request);
-    delete unsigned.coordinatorApproval;
-    const expectedUnsignedHash = sha256(Buffer.from(`${JSON.stringify(unsigned)}\n`));
-    if (approval.requestHash !== expectedUnsignedHash) throw new ContractError('request.coordinatorApproval.requestHash does not bind the unsigned request bytes');
-  } else if (approval.schemaVersion !== COORDINATOR_APPROVAL_SCHEMA_VERSION) {
-    throw new ContractError('v0.2 request requires a v0.2 coordinator approval');
-  }
+  if (approval.schemaVersion !== COORDINATOR_APPROVAL_SCHEMA_VERSION_V03) throw new ContractError('request requires a v0.3 coordinator approval');
+  const unsigned = structuredClone(request);
+  delete unsigned.coordinatorApproval;
+  const expectedUnsignedHash = sha256(Buffer.from(`${JSON.stringify(unsigned)}\n`));
+  if (approval.requestHash !== expectedUnsignedHash) throw new ContractError('request.coordinatorApproval.requestHash does not bind the unsigned request bytes');
   const subjectHash = codexApprovalSubjectHash({ request, approval, role, cwd });
   if (approval.subjectHash !== subjectHash) {
     throw new ContractError('request.coordinatorApproval.subjectHash does not bind this request, role, cwd, and rule set');
   }
 
-  const discovered = v03 ? discoverCoordinatorAgentsRules(cwd) : discoverAgentsRules(cwd);
-  const suppliedRules = v03 ? approval.rules : approval.rules.filter((rule) => rule.source === 'repository');
+  const discovered = discoverCoordinatorAgentsRules(cwd);
+  const suppliedRules = approval.rules;
   if (suppliedRules.length !== discovered.length) {
-    throw new ContractError(`request.coordinatorApproval.rules does not contain every applicable ${v03 ? 'coordinator and repository' : 'repository'} AGENTS.md file`);
+    throw new ContractError('request.coordinatorApproval.rules does not contain every applicable coordinator and repository AGENTS.md file');
   }
   for (let index = 0; index < discovered.length; index += 1) {
     const expected = discovered[index];

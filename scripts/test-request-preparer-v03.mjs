@@ -11,10 +11,10 @@ const instructionsPath = new URL('../README.md', import.meta.url).pathname;
 test('intent hash is semantic and independent from recursive identity and budgets', () => {
   const temp = mkdtempSync(join(tmpdir(), 'handoff-prepare-test-'));
   try {
-    const root = prepareV03Request({ operation: 'advice', callerHarness: 'grok', targetHarness: 'claude', cwd, instructionsPath, tempRoot: temp });
+    const root = prepareV03Request({ verb: 'advice', operation: 'advice', callerHarness: 'grok', targetHarness: 'claude', cwd, instructionsPath, tempRoot: temp });
     const common = {
-      operation: 'advice', callerHarness: 'claude', targetHarness: 'grok', cwd, instructionsPath, tempRoot: temp,
-      provenance: 'supervisor-derived', parentGrants: root.request.grants, limits: root.request.budgets.limits,
+      verb: 'advice', operation: 'advice', callerHarness: 'claude', targetHarness: 'grok', cwd, instructionsPath, tempRoot: temp,
+      provenance: 'supervisor-derived', parentGrants: root.request.grants, parentDelegation: root.request.delegation, limits: root.request.budgets.limits,
     };
     const first = prepareV03Request({ ...common, lineage: { rootRunId: root.request.lineage.runId, runId: 'child-one', parentRunId: root.request.lineage.runId, depth: 1, dependencies: [] }, budgets: root.request.budgets });
     const second = prepareV03Request({ ...common, lineage: { rootRunId: root.request.lineage.runId, runId: 'child-two', parentRunId: root.request.lineage.runId, depth: 1, dependencies: [{ type: 'advises', runId: root.request.lineage.runId }] }, budgets: { limits: root.request.budgets.limits, remaining: { nodes: 1, adviceNodes: 1, handoffNodes: 1 } } });
@@ -26,6 +26,6 @@ test('intent hash is semantic and independent from recursive identity and budget
 });
 
 test('preparation rejects caller provenance and unsafe paths before producing bytes', () => {
-  assert.throws(() => prepareV03Request({ operation: 'handoff', callerHarness: 'grok', targetHarness: 'claude', mode: 'build', cwd, instructionsPath, tempRoot: '/tmp' }), /codex\|claude/);
-  assert.throws(() => prepareV03Request({ operation: 'advice', callerHarness: 'claude', targetHarness: 'grok', cwd: '.', instructionsPath, tempRoot: '/tmp' }), /absolute/);
+  assert.throws(() => prepareV03Request({ verb: 'run', operation: 'handoff', callerHarness: 'grok', targetHarness: 'claude', mode: 'build', cwd, instructionsPath, tempRoot: '/tmp' }), /codex\|claude/);
+  assert.throws(() => prepareV03Request({ verb: 'advice', operation: 'advice', callerHarness: 'claude', targetHarness: 'grok', cwd: '.', instructionsPath, tempRoot: '/tmp' }), /absolute/);
 });

@@ -14,7 +14,7 @@ if (process.env.HANDOFF_FAKE_INVOCATION_CAPTURE) {
   writeFileSync(process.env.HANDOFF_FAKE_INVOCATION_CAPTURE, JSON.stringify({
     executable,
     args,
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('OPENCODE_') || key.startsWith('XDG_'))),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('OPENCODE_') || key.startsWith('XDG_') || key.startsWith('HANDOFF_'))),
   }));
 }
 
@@ -94,7 +94,6 @@ if (process.env.HANDOFF_FAKE_PROMPT_CAPTURE) {
   writeFileSync(process.env.HANDOFF_FAKE_PROMPT_CAPTURE, prompt);
 }
 
-const v03 = prompt.includes('Handoff v0.3');
 const role = prompt.match(/machine role '([^']+)'/u)?.[1] || prompt.match(/in mode '([^']+)'/u)?.[1] || 'review';
 const cwd = after('--cd') || after('--cwd') || after('--dir') || after('-C') || process.cwd();
 const mode = process.env.HANDOFF_FAKE_MODE || 'success';
@@ -123,9 +122,9 @@ if (mode === 'hang') {
 }
 
 const output = {
-  schemaVersion: v03 ? 'handoff.provider-output.v0.3' : 'handoff.provider-output.v0.2',
+  schemaVersion: 'handoff.provider-output.v0.3',
   status: mode === 'exit' ? 'failed' : 'completed',
-  [v03 ? 'response' : 'summary']: mode === 'exit' ? 'fake provider failure' : `fake ${role} completed`,
+  response: mode === 'exit' ? 'fake provider failure' : `fake ${role} completed`,
   evidence: changedPath ? [{ kind: 'file-change', path: changedPath, summary: 'fake changed a file' }] : [],
   findings: [],
   usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
@@ -133,7 +132,7 @@ const output = {
 
 let serialized = JSON.stringify(output);
 if (mode === 'prose') serialized = 'Everything looks good.';
-if (mode === 'oversized') serialized = JSON.stringify({ ...output, [v03 ? 'response' : 'summary']: 'x'.repeat(300_000) });
+if (mode === 'oversized') serialized = JSON.stringify({ ...output, response: 'x'.repeat(300_000) });
 if (mode === 'schema-drift') serialized = JSON.stringify({ ...output, schemaVersion: 'handoff.provider-output.v9' });
 if (mode === 'unknown-field') serialized = JSON.stringify({ ...output, surprise: true });
 if (mode === 'unsafe-evidence-path') serialized = JSON.stringify({
@@ -150,7 +149,6 @@ if (mode === 'runtime-sandbox-missing') {
 
 function providerStdout() {
   if (executable === 'grok') {
-    if (mode === 'grok-legacy-direct') return serialized;
     let structuredOutput;
     try { structuredOutput = JSON.parse(serialized); }
     catch { structuredOutput = null; }

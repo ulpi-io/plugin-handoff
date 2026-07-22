@@ -1,0 +1,4 @@
+interface:
+  display_name: "Claude Handoff"
+  short_description: "Delegate to Claude without nested advice"
+  default_prompt: "Use $handoff-claude to delegate this bounded task to Claude with no nested Handoff capability."

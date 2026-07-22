@@ -2,7 +2,8 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ContractError } from './contracts.mjs';
-import { executeMachineRun, machineCapabilities, machineCapabilitiesV03, parseMachineCli } from './machine.mjs';
+import { acquireRootInvocationAuthority, assertFrontendInvocationAuthority } from './invocation-authority.mjs';
+import { executeMachineRun, machineCapabilitiesV03 } from './machine.mjs';
 import { executeNestedRequest, hasSupervisorContext } from './nested-client.mjs';
 import { createSupervisorRuntimeDirectory } from './paths.mjs';
 import { prepareV03Request } from './request-preparer.mjs';
@@ -48,12 +49,13 @@ function dependency(value) {
 }
 
 export function parseFrontendCli(argv, { nested = hasSupervisorContext() } = {}) {
-  if (argv[0] === 'capabilities') return { family: 'machine', options: parseMachineCli(argv) };
-  if (argv[0] === 'run' && argv.includes('--provider')) return { family: 'machine', options: parseMachineCli(argv) };
+  if (argv[0] === 'capabilities') {
+    if (argv.length !== 2 || argv[1] !== '--json') throw new ContractError('usage: capabilities --json');
+    return { family: 'capabilities' };
+  }
   const verb = argv[0];
-  // Preserve the v0.2 machine parser and its exact rejection contract for removed/unknown legacy
-  // command shapes. Only the two explicit v0.3 frontend verbs enter the new parser.
-  if (!['advice', 'run'].includes(verb)) return { family: 'machine', options: parseMachineCli(argv) };
+  if (!['advice', 'run', 'run-with-advice'].includes(verb)) throw new ContractError("command must be 'capabilities', 'advice', 'run', or 'run-with-advice'");
+  if (nested && verb !== 'advice') throw new ContractError('nested Handoff permits advice only');
   const values = {};
   const dependencies = [];
   const limits = {};
@@ -82,10 +84,11 @@ export function parseFrontendCli(argv, { nested = hasSupervisorContext() } = {})
   if (operation === 'handoff' && !MODES.includes(values.mode)) throw new ContractError(`run requires --mode ${MODES.join('|')}`);
   if (!nested && operation === 'handoff' && !['codex', 'claude'].includes(values.caller_harness)) throw new ContractError('root run requires --caller-harness codex|claude');
   return {
-    family: 'v0.3',
+    family: 'operation',
     nested,
     options: {
       operation,
+      verb,
       callerHarness: values.caller_harness,
       targetHarness: values.harness,
       mode: values.mode ?? null,
@@ -109,30 +112,35 @@ function closureStatus(status) {
 }
 
 export async function executeFrontend(argv, dependencies = {}) {
-  const parsed = parseFrontendCli(argv, { nested: dependencies.nested ?? hasSupervisorContext(dependencies.environment ?? process.env) });
-  if (parsed.family === 'machine') {
-    if (parsed.options.command === 'capabilities') {
-      const capabilities = parsed.options.version === 'v0.3'
-        ? (dependencies.machineCapabilitiesV03 ?? machineCapabilitiesV03)()
-        : (dependencies.machineCapabilities ?? machineCapabilities)();
-      const bytes = Buffer.from(`${JSON.stringify(capabilities)}\n`);
-      return { bytes, result: capabilities, exitCode: 0 };
-    }
-    const machine = await (dependencies.executeMachineRun ?? executeMachineRun)(parsed.options);
-    return { bytes: Buffer.from(`${JSON.stringify(machine.result)}\n`), result: machine.result, exitCode: machine.exitCode };
+  const environment = dependencies.environment ?? process.env;
+  const nested = dependencies.nested ?? hasSupervisorContext(environment);
+  const parsed = parseFrontendCli(argv, { nested });
+  if (parsed.family === 'capabilities') {
+    const capabilities = (dependencies.machineCapabilitiesV03 ?? machineCapabilitiesV03)();
+    const bytes = Buffer.from(`${JSON.stringify(capabilities)}\n`);
+    return { bytes, result: capabilities, exitCode: 0 };
   }
-  if (parsed.nested) return (dependencies.executeNestedRequest ?? executeNestedRequest)(parsed.options, { contextRaw: dependencies.environment?.HANDOFF_SUPERVISOR_CONTEXT });
+  (dependencies.assertInvocationAuthority ?? assertFrontendInvocationAuthority)({
+    nested: parsed.nested,
+    verb: parsed.options.verb,
+  });
+  if (parsed.nested) return (dependencies.executeNestedRequest ?? executeNestedRequest)(parsed.options, { contextRaw: environment.HANDOFF_SUPERVISOR_CONTEXT });
 
-  const temp = createSupervisorRuntimeDirectory();
+  const authority = (dependencies.acquireRootInvocationAuthority ?? acquireRootInvocationAuthority)();
+  let temp = null;
   let supervisor;
   try {
+    temp = createSupervisorRuntimeDirectory();
     const prepared = (dependencies.prepareV03Request ?? prepareV03Request)({ ...parsed.options, tempRoot: temp });
     const requestPath = join(temp, 'root-request.json');
     writeFileSync(requestPath, prepared.bytes, { mode: 0o600, flag: 'wx' });
     const Supervisor = dependencies.Supervisor ?? HandoffSupervisor;
     supervisor = new Supervisor({ rootPrepared: prepared, executeMachineRun: dependencies.executeMachineRun ?? executeMachineRun });
-    await supervisor.start();
-    const supervisorContext = supervisor.contextForRoot();
+    let supervisorContext = null;
+    if (prepared.request.delegation.mode === 'advice-only') {
+      await supervisor.start();
+      supervisorContext = supervisor.contextForRoot();
+    }
     const machine = await (dependencies.executeMachineRun ?? executeMachineRun)({
       command: 'run',
       provider: prepared.request.target.harness,
@@ -162,6 +170,7 @@ export async function executeFrontend(argv, dependencies = {}) {
     return { bytes, result: machine.result, exitCode: machine.exitCode };
   } finally {
     if (supervisor) { try { await supervisor.close('cancelled'); } catch { /* retain primary failure */ } }
-    try { rmSync(temp, { recursive: true, force: true }); } catch { /* exact frontend temp only */ }
+    if (temp) { try { rmSync(temp, { recursive: true, force: true }); } catch { /* exact frontend temp only */ } }
+    authority.release();
   }
 }

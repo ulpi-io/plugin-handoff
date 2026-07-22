@@ -13,7 +13,7 @@ const instructionsPath = new URL('../README.md', import.meta.url).pathname;
 test('DAG snapshots bind typed dependencies and exact remaining counters', () => {
   const temp = mkdtempSync(join(tmpdir(), 'handoff-dag-schema-'));
   try {
-    const root = prepareV03Request({ operation: 'advice', callerHarness: 'grok', targetHarness: 'claude', cwd, instructionsPath, tempRoot: temp });
+    const root = prepareV03Request({ verb: 'advice', operation: 'advice', callerHarness: 'grok', targetHarness: 'claude', cwd, instructionsPath, tempRoot: temp });
     const store = new DagStore({ rootRequest: root.request, auditPath: join(temp, 'dag.json') });
     const snapshot = parseDagSnapshot(Buffer.from(JSON.stringify(store.snapshot())));
     assert.equal(snapshot.nodes.length, 1);

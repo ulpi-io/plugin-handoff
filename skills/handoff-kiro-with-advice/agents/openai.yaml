@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kiro Handoff With Advice"
+  short_description: "Delegate to Kiro with optional advice"
+  default_prompt: "Use $handoff-kiro-with-advice to delegate this bounded task to Kiro and allow read-only consultation."

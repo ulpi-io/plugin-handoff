@@ -1,8 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 import { ContractError, parseMachineResultV03, sha256 } from './contracts.mjs';
 import { createDagRuntime, scavengeSupervisorRuntimes } from './dag.mjs';
@@ -13,9 +12,7 @@ const MAX_FRAME_BYTES = 2_300_000;
 function endpointFor(directory) {
   return process.platform === 'win32'
     ? `\\\\.\\pipe\\handoff-${process.pid}-${randomUUID()}`
-    // Loopback TCP avoids Darwin's short AF_UNIX path cap while the 256-bit capability token
-    // authenticates every frame. The endpoint carries no DAG path or authority by itself.
-    : null;
+    : join(directory, 'mailbox');
 }
 
 function terminalState(result) {
@@ -40,24 +37,38 @@ export class HandoffSupervisor {
     this.capabilities = new Map();
     this.active = new Set();
     this.server = null;
+    this.poller = null;
+    this.polling = false;
+    this.mailboxHandlers = new Set();
     this.closed = false;
     this.rootDeadline = Date.now() + rootPrepared.request.budgets.limits.rootTimeoutMs;
     scavengeSupervisorRuntimes();
   }
 
-  issueCapability({ parentRunId, callerHarness, parentGrants, maxUses = this.rootPrepared.request.budgets.limits.maxNodes }) {
+  issueCapability({ parentRunId, callerHarness, parentGrants, parentDelegation, maxUses = this.rootPrepared.request.budgets.limits.maxNodes }) {
     if (this.closed) throw new ContractError('supervisor is closed');
+    if (parentDelegation?.mode !== 'advice-only') throw new ContractError('parent request does not authorize nested advice');
     const token = randomBytes(32).toString('base64url');
-    this.capabilities.set(token, { parentRunId, callerHarness, parentGrants: structuredClone(parentGrants), remainingUses: maxUses, nonces: new Set() });
+    this.capabilities.set(token, {
+      parentRunId,
+      callerHarness,
+      parentGrants: structuredClone(parentGrants),
+      parentDelegation: structuredClone(parentDelegation),
+      allowedOperations: ['advice'],
+      remainingUses: maxUses,
+      nonces: new Set(),
+    });
     return token;
   }
 
   contextForRoot() {
     const request = this.rootPrepared.request;
+    if (request.delegation.mode !== 'advice-only') throw new ContractError('plain handoff has no supervisor capability');
     const token = this.issueCapability({
       parentRunId: request.lineage.runId,
       callerHarness: request.target.harness,
       parentGrants: request.grants,
+      parentDelegation: request.delegation,
     });
     return JSON.stringify({
       schemaVersion: 'handoff.supervisor-context.v0.3',
@@ -65,11 +76,19 @@ export class HandoffSupervisor {
       token,
       callerHarness: request.target.harness,
       rootRunId: request.lineage.rootRunId,
+      allowedOperations: ['advice'],
     });
   }
 
   async start() {
-    if (this.server) throw new ContractError('supervisor is already started');
+    if (this.server || this.poller) throw new ContractError('supervisor is already started');
+    if (process.platform !== 'win32') {
+      mkdirSync(join(this.endpoint, 'requests'), { recursive: true, mode: 0o700 });
+      mkdirSync(join(this.endpoint, 'replies'), { recursive: true, mode: 0o700 });
+      this.poller = setInterval(() => { void this.pollMailbox(); }, 10);
+      this.poller.unref?.();
+      return this;
+    }
     this.server = createServer((socket) => {
       let bytes = Buffer.alloc(0);
       socket.on('data', (chunk) => {
@@ -90,18 +109,45 @@ export class HandoffSupervisor {
     });
     await new Promise((resolve, reject) => {
       this.server.once('error', reject);
-      const listenTarget = this.endpoint ?? { host: '127.0.0.1', port: 0, exclusive: true };
-      this.server.listen(listenTarget, () => {
-        if (this.endpoint === null) {
-          const address = this.server.address();
-          this.endpoint = `tcp://127.0.0.1:${address.port}`;
-        }
+      this.server.listen(this.endpoint, () => {
         this.server.removeListener('error', reject);
         resolve();
       });
     });
-    if (process.platform !== 'win32' && !this.endpoint.startsWith('tcp://')) chmodSync(this.endpoint, 0o600);
     return this;
+  }
+
+  async pollMailbox() {
+    if (this.polling || this.closed) return;
+    this.polling = true;
+    try {
+      const requests = join(this.endpoint, 'requests');
+      const replies = join(this.endpoint, 'replies');
+      for (const name of readdirSync(requests).filter((entry) => /^request-[0-9a-f-]{36}\.json$/u.test(entry)).sort()) {
+        const requestPath = join(requests, name);
+        let frame;
+        try {
+          frame = readFileSync(requestPath);
+          if (frame.length > MAX_FRAME_BYTES) throw new ContractError('supervisor request frame exceeds limit');
+        } finally {
+          rmSync(requestPath, { force: true });
+        }
+        const replyName = name.replace(/^request-/u, 'reply-');
+        const handler = (async () => {
+          let response;
+          try { response = await this.handleFrame(frame); }
+          catch (error) { response = { schemaVersion: 'handoff.supervisor-reply.v0.3', ok: false, error: error.message }; }
+          writeFileSync(join(replies, replyName), `${JSON.stringify(response)}\n`, { mode: 0o600, flag: 'wx' });
+        })();
+        this.mailboxHandlers.add(handler);
+        void handler.then(
+          () => this.mailboxHandlers.delete(handler),
+          () => this.mailboxHandlers.delete(handler),
+        );
+      }
+    } finally {
+      this.polling = false;
+    }
   }
 
   async handleFrame(frame) {
@@ -114,13 +160,13 @@ export class HandoffSupervisor {
     if (message.schemaVersion !== 'handoff.supervisor-request.v0.3') throw new ContractError('supervisor request version drift');
     const capability = this.capabilities.get(message.token);
     if (!capability) throw new ContractError('supervisor capability token is invalid');
+    if (message.operation !== 'advice' || !capability.allowedOperations.includes(message.operation)) throw new ContractError('supervisor capability permits nested advice only');
     if (typeof message.nonce !== 'string' || !message.nonce || capability.nonces.has(message.nonce)) throw new ContractError('supervisor request nonce is invalid or replayed');
     if (capability.remainingUses < 1) throw new ContractError('supervisor capability is exhausted');
     capability.nonces.add(message.nonce);
     capability.remainingUses -= 1;
     const parent = this.runtime.store.nodes.get(capability.parentRunId);
     if (!parent) throw new ContractError('supervisor capability parent is missing');
-    if (message.operation === 'handoff' && !['codex', 'claude'].includes(capability.callerHarness)) throw new ContractError('derived caller cannot launch a handoff');
     const runId = `run-${randomUUID()}`;
     const instructionPath = join(this.runtime.directory, `instructions-${runId}.txt`);
     if (typeof message.instructions !== 'string' || !message.instructions.trim() || Buffer.byteLength(message.instructions) > 2_000_000) throw new ContractError('nested instructions are empty or oversized');
@@ -141,6 +187,7 @@ export class HandoffSupervisor {
     };
     const timeoutMs = Math.min(snapshot.limits.timeoutMs, Math.max(100, this.rootDeadline - Date.now()));
     const prepared = this.prepareRequest({
+      verb: 'advice',
       operation: message.operation,
       callerHarness: capability.callerHarness,
       targetHarness: message.targetHarness,
@@ -154,6 +201,7 @@ export class HandoffSupervisor {
       webSearch: message.grants?.webSearch,
       mcpConfig: mcpPath,
       parentGrants: capability.parentGrants,
+      parentDelegation: capability.parentDelegation,
       provenance: 'supervisor-derived',
       lineage,
       limits: snapshot.limits,
@@ -191,8 +239,20 @@ export class HandoffSupervisor {
   }
 
   childContext(request) {
-    const token = this.issueCapability({ parentRunId: request.lineage.runId, callerHarness: request.target.harness, parentGrants: request.grants });
-    return JSON.stringify({ schemaVersion: 'handoff.supervisor-context.v0.3', endpoint: this.endpoint, token, callerHarness: request.target.harness, rootRunId: request.lineage.rootRunId });
+    const token = this.issueCapability({
+      parentRunId: request.lineage.runId,
+      callerHarness: request.target.harness,
+      parentGrants: request.grants,
+      parentDelegation: request.delegation,
+    });
+    return JSON.stringify({
+      schemaVersion: 'handoff.supervisor-context.v0.3',
+      endpoint: this.endpoint,
+      token,
+      callerHarness: request.target.harness,
+      rootRunId: request.lineage.rootRunId,
+      allowedOperations: ['advice'],
+    });
   }
 
   async close(status = 'cancelled') {
@@ -200,8 +260,10 @@ export class HandoffSupervisor {
     this.closed = true;
     this.capabilities.clear();
     const final = this.runtime.store.close(status);
+    if (this.poller) clearInterval(this.poller);
+    while (this.polling) await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.allSettled([...this.mailboxHandlers]);
     await new Promise((resolve) => this.server ? this.server.close(() => resolve()) : resolve());
-    if (process.platform !== 'win32' && this.endpoint && !this.endpoint.startsWith('tcp://')) { try { rmSync(this.endpoint, { force: true }); } catch { /* exact endpoint only */ } }
     if (this.cleanup) { try { rmSync(this.runtime.directory, { recursive: true, force: true }); } catch { /* exact runtime directory only */ } }
     return final;
   }

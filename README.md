@@ -3,9 +3,9 @@
 Handoff lets an agent ask another model for read-only advice or delegate a bounded build/review
 through one fail-closed Node entrypoint. It supports Codex, Grok, Kiro, Claude, OpenCode, and Cursor.
 
-Version 0.4 adds operation-aware v0.3 contracts, model/effort/turn selection receipts, explicit
-Bash/web/MCP grants, and an ephemeral supervisor-owned DAG. The v0.2 machine ABI remains available
-for existing integrations.
+Version 0.4 uses one operation-aware v0.3 contract, model/effort/turn selection receipts, explicit
+Bash/web/MCP grants, and two deliberately separate delegation families: plain handoff and handoff
+with advice. The old v0.2 scripts and contracts are removed.
 
 ## Installation
 
@@ -57,12 +57,13 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
 ```
 
 Advice is structurally read-only. The answer is `output.response`; evidence and findings remain
-separate arrays. Advice cannot gain write authority even when the target can build.
+separate arrays. Advice cannot gain write authority even when the target can build. An adviser may
+request further read-only advice, but it cannot launch a handoff.
 
 `--caller-harness` is explicit root lineage metadata, not authentication. The selected provider
 uses its own native logged-in CLI or API-key precedence.
 
-## Run a higher-level handoff
+## Run a plain handoff
 
 A Codex or Claude root can delegate `build`, `phase`, `review`, or `verify`:
 
@@ -79,21 +80,54 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
   --result /absolute/private/handoff-result.json
 ```
 
+Plain `run` gives the worker no supervisor context and no way to request nested advice. Select this
+form when the worker must complete independently.
+
+## Run a handoff with advice
+
+Use the separate verb when the worker may consult another model:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run-with-advice \
+  --caller-harness codex \
+  --harness grok \
+  --mode build \
+  --cwd "$(pwd -P)" \
+  --instructions /absolute/private/instructions.txt \
+  --result /absolute/private/handoff-result.json
+```
+
+This gives the worker one attenuated capability: nested read-only `advice`. It cannot invoke nested
+`run`, `run-with-advice`, build, phase, review, verify, or any provider CLI directly.
+
+| Target | Plain skill | With-advice skill | Claude commands |
+|---|---|---|---|
+| Codex | `$handoff-codex` | `$handoff-codex-with-advice` | build/review, each plain or with-advice |
+| Grok | `$handoff-grok` | `$handoff-grok-with-advice` | build/review, each plain or with-advice |
+| Kiro | `$handoff-kiro` | `$handoff-kiro-with-advice` | review, plain or with-advice |
+| Claude | `$handoff-claude` | `$handoff-claude-with-advice` | build/review, each plain or with-advice |
+| OpenCode | `$handoff-opencode` | `$handoff-opencode-with-advice` | build/review, each plain or with-advice |
+| Cursor | `$handoff-cursor` | `$handoff-cursor-with-advice` | build/review, each plain or with-advice |
+
+`$handoff-run` and `$handoff-run-with-advice` are the advanced generic surfaces. `$get-advice` is
+the standalone read-only consultation surface.
+
 Build/phase must produce a Git-observable change. Advice/review/verify block if the supplied
 worktree changes. Only driver exit `0` plus result status `succeeded` is green.
 
 ## Nested calls and DAG lineage
 
-Each root starts one temporary supervisor. It owns capability tokens, budgets, lineage, dependency
-state, and an audit snapshot outside provider-writable paths. It is not a persistent daemon.
+Root advice and `run-with-advice` start one temporary supervisor. It owns advice-only capability
+tokens, budgets, lineage, dependency state, and an audit snapshot outside the worktree. Plain `run`
+does not start or expose a supervisor. The supervisor is not a persistent daemon.
 
 ```text
 root frontend
   -> private v0.3 request
-  -> ephemeral supervisor (DAG + capabilities)
+  -> optional ephemeral supervisor (DAG + advice-only capabilities)
   -> one machine executor
   -> provider CLI
-       -> authenticated local IPC for a nested request
+       -> authenticated private mailbox for nested advice
        -> the same supervisor and machine executor
 ```
 
@@ -109,10 +143,11 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
 ```
 
 Dependencies are repeatable and typed as `requires:<run-id>`, `advises:<run-id>`, or
-`verifies:<run-id>`. The supervisor derives caller, root, parent, and depth. Workers cannot author
-those fields, widen parent grants, raise root budgets, repeat an ancestor intent, or bypass the
-machine executor. Cancellation terminalizes outstanding nodes and removes the local endpoint and
-runtime state.
+`verifies:<run-id>`. The supervisor derives caller, root, parent, depth, and `advice-only`
+delegation. Workers cannot author those fields, widen parent grants, raise root budgets, repeat an
+ancestor intent, or bypass the machine executor. A private root lease blocks environment-stripped
+root re-entry and direct machine execution. Root Handoffs are serialized per OS user; cancellation
+terminalizes outstanding nodes and removes the mailbox and runtime state.
 
 The same-UID threat model remains explicit: the capability protocol does not defend against a
 compromised coordinator or another process running as the same OS user. Use a container or VM when
@@ -187,7 +222,7 @@ v0.3 providers return `handoff.provider-output.v0.3` with `response`, `evidence`
 `usage`. Handoff normalizes that into `handoff.result.v0.3` with:
 
 - exact request-byte `requestHash` and lineage-independent semantic `intentHash`;
-- caller/target/mode, resolved selection and grant receipts, and provider policy;
+- caller/target/mode, resolved selection, grant, and `delegation` receipts, and provider policy;
 - `output.response` (advice answer or handoff summary), evidence, and findings;
 - Git before/after fingerprints, timing, usage, exit state, and redacted diagnostics;
 - the supervisor DAG snapshot when available.
@@ -196,42 +231,23 @@ Stdout is one compact JSON line and is byte-identical to the newly reserved resu
 are `0` success, `2` provider failure/block, `3` unavailable, `5` rejected input, `7` invalid output,
 `8` timeout, `9` cancellation, and `10` policy block.
 
+Inspect `result.delegation.mode`: plain `run` records `none`; root `advice` and
+`run-with-advice` record `advice-only`; nested advice also records provenance `parent-attenuated`.
+
 ## Capability discovery
 
-The original command remains byte-compatible:
+The current capability contract is:
 
 ```bash
 node scripts/handoff.mjs capabilities --json
 ```
 
-Request the v0.3 selection/grant view explicitly:
-
-```bash
-node scripts/handoff.mjs capabilities --json --version v0.3
-```
-
 See [the provider matrix](references/providers.md) for exact controls and isolation boundaries.
-
-## Legacy v0.2 ABI
-
-Existing callers can keep preparing `handoff.request.v0.2` with `scripts/prepare-request.mjs` and
-executing:
-
-```bash
-node scripts/handoff.mjs run \
-  --provider grok --role review --cwd /absolute/worktree \
-  --request /absolute/private/request.json \
-  --result /absolute/private/result.json
-```
-
-The v0.2 request/provider/result shapes, strict path handling, exit mapping, Git evidence, and output
-normalization remain in place.
 
 ## Validation
 
 ```bash
 node scripts/bundle-digest.mjs --check
-node --test scripts/test-pipeline-e2e.mjs
 node --test scripts/test-release-v04.mjs
 ```
 

@@ -19,6 +19,7 @@ function nodeFromRequest(request, state = 'pending') {
     callerHarness: request.caller.harness,
     targetHarness: request.target.harness,
     mode: request.mode,
+    delegation: structuredClone(request.delegation),
     intentHash: request.intentHash,
     dependencies: structuredClone(request.lineage.dependencies),
     state,
@@ -104,11 +105,11 @@ export class DagStore {
     if (!parent) throw new ContractError(`DAG parent '${node.parentRunId}' does not exist`);
     if (node.depth !== parent.depth + 1 || node.depth > this.limits.maxDepth) throw new ContractError('nested DAG depth is invalid or exhausted');
     if (node.callerHarness !== parent.targetHarness) throw new ContractError('nested caller harness must be derived from the parent target harness');
-    if (node.operation === 'handoff' && !['codex', 'claude'].includes(node.callerHarness)) throw new ContractError('nested handoff caller must derive from Codex or Claude');
+    if (parent.delegation.mode !== 'advice-only') throw new ContractError('DAG parent does not authorize nested operations');
+    if (node.operation !== 'advice' || node.delegation.mode !== 'advice-only' || node.delegation.provenance !== 'parent-attenuated') throw new ContractError('DAG permits nested advice-only delegation only');
     if (this.nodes.size >= this.limits.maxNodes) throw new ContractError('DAG maxNodes budget is exhausted');
     const counts = this.counts();
     if (node.operation === 'advice' && counts.advice >= this.limits.maxAdviceNodes) throw new ContractError('DAG maxAdviceNodes budget is exhausted');
-    if (node.operation === 'handoff' && counts.handoff >= this.limits.maxHandoffNodes) throw new ContractError('DAG maxHandoffNodes budget is exhausted');
     if (counts.active >= this.limits.maxConcurrency) throw new ContractError('DAG maxConcurrency budget is exhausted');
     if (this.ancestors(node.parentRunId).some((ancestor) => ancestor.intentHash === node.intentHash)) throw new ContractError('DAG rejects repeated intent in its ancestry');
     for (const dependency of node.dependencies) {

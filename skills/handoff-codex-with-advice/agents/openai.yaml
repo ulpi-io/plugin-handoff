@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Handoff With Advice"
+  short_description: "Delegate to Codex with optional advice"
+  default_prompt: "Use $handoff-codex-with-advice to delegate this bounded task to Codex and allow read-only consultation."

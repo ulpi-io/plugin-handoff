@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plain Handoff"
+  short_description: "Delegate without nested advice authority"
+  default_prompt: "Use $handoff-run to delegate this bounded task without giving the worker nested Handoff access."

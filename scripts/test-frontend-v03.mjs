@@ -20,6 +20,7 @@ test('frontend parses exact root and nested forms without shorthands', () => {
   assert.throws(() => parseFrontendCli(['run', '--caller-harness', 'grok', '--harness', 'claude', '--mode', 'build', '--cwd', cwd, '--instructions', instructions, '--result', '/tmp/r'], { nested: false }), /codex\|claude/);
   assert.throws(() => parseFrontendCli([...command('/tmp/r'), '--model', 'other'], { nested: false }), /duplicate/);
   assert.throws(() => parseFrontendCli(command('/tmp/r'), { nested: true }), /must not supply/);
+  for (const verb of ['run', 'run-with-advice']) assert.throws(() => parseFrontendCli([verb], { nested: true }), /permits advice only/);
 });
 
 test('frontend routes root execution once and emits byte-identical result bytes', async () => {
@@ -57,9 +58,9 @@ test('frontend routes root execution once and emits byte-identical result bytes'
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
-test('capabilities version routing preserves v0.2 and exposes v0.3 explicitly', async () => {
-  const legacy = await executeFrontend(['capabilities', '--json'], { nested: false, machineCapabilities: () => ({ schemaVersion: 'handoff.capabilities.v0.2' }) });
-  const current = await executeFrontend(['capabilities', '--json', '--version', 'v0.3'], { nested: false, machineCapabilitiesV03: () => ({ schemaVersion: 'handoff.capabilities.v0.3' }) });
-  assert.equal(legacy.result.schemaVersion, 'handoff.capabilities.v0.2');
+test('capabilities exposes only the current contract', async () => {
+  const current = await executeFrontend(['capabilities', '--json'], { nested: false, machineCapabilitiesV03: () => ({ schemaVersion: 'handoff.capabilities.v0.3' }) });
   assert.equal(current.result.schemaVersion, 'handoff.capabilities.v0.3');
+  await assert.rejects(() => executeFrontend(['capabilities', '--json', '--version', 'v0.3'], { nested: false }), /usage: capabilities --json/);
+  assert.throws(() => parseFrontendCli(['run', '--provider', 'grok'], { nested: false }), /unknown argument|missing argument/);
 });

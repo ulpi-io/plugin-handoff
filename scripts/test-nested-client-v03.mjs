@@ -18,7 +18,7 @@ test('nested client rejects malformed context and pre-existing result paths', as
     writeFileSync(result, 'occupied');
     const options = { operation: 'advice', targetHarness: 'grok', cwd: process.cwd(), instructionsPath: new URL('../README.md', import.meta.url).pathname, result };
     await assert.rejects(() => executeNestedRequest(options, { contextRaw: '{bad' }), /malformed/);
-    const context = JSON.stringify({ schemaVersion: 'handoff.supervisor-context.v0.3', endpoint: join(temp, 'missing.sock'), token: 'token', callerHarness: 'claude', rootRunId: 'root' });
+    const context = JSON.stringify({ schemaVersion: 'handoff.supervisor-context.v0.3', endpoint: join(temp, 'missing.sock'), token: 'token', callerHarness: 'claude', rootRunId: 'root', allowedOperations: ['advice'] });
     await assert.rejects(() => executeNestedRequest(options, { contextRaw: context }), /already exists/);
     assert.equal(hasSupervisorContext({ HANDOFF_SUPERVISOR_CONTEXT: context }), true);
   } finally { rmSync(temp, { recursive: true, force: true }); }

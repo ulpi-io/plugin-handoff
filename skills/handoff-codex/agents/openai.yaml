@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Handoff"
+  short_description: "Delegate to Codex without nested advice"
+  default_prompt: "Use $handoff-codex to delegate this bounded task to Codex with no nested Handoff capability."

@@ -25,7 +25,7 @@
     },
     "node": {
       "type": "object", "additionalProperties": false,
-      "required": ["runId", "parentRunId", "depth", "operation", "callerHarness", "targetHarness", "mode", "intentHash", "dependencies", "state", "requestHash", "resultHash", "startedAt", "finishedAt"],
+      "required": ["runId", "parentRunId", "depth", "operation", "callerHarness", "targetHarness", "mode", "delegation", "intentHash", "dependencies", "state", "requestHash", "resultHash", "startedAt", "finishedAt"],
       "properties": {
         "runId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "parentRunId": { "type": ["string", "null"] },
@@ -34,6 +34,7 @@
         "callerHarness": { "$ref": "#/$defs/harness" },
         "targetHarness": { "$ref": "#/$defs/harness" },
         "mode": { "type": ["string", "null"], "enum": ["build", "phase", "review", "verify", null] },
+        "delegation": { "$ref": "#/$defs/delegation" },
         "intentHash": { "$ref": "#/$defs/hash" },
         "dependencies": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/dependency" } },
         "state": { "enum": ["pending", "running", "succeeded", "blocked", "failed", "timed_out", "cancelled", "rejected", "not_run"] },
@@ -41,6 +42,14 @@
         "resultHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
         "startedAt": { "type": ["string", "null"], "format": "date-time" },
         "finishedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "delegation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "provenance"],
+      "properties": {
+        "mode": { "enum": ["none", "advice-only"] },
+        "provenance": { "enum": ["verb-derived", "parent-attenuated"] }
       }
     },
     "limits": {

@@ -1,5 +1,5 @@
 // Strict Kiro review adapter. Only canonical read-only tools are trusted; build/phase are not advertised.
-import { ContractError, PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03, decodeUtf8 } from '../contracts.mjs';
+import { ContractError, PROVIDER_OUTPUT_SCHEMA_VERSION_V03, decodeUtf8 } from '../contracts.mjs';
 import { locateExecutable } from '../which.mjs';
 import { flagPreflight } from '../provider-preflight.mjs';
 
@@ -7,7 +7,7 @@ export const id = 'kiro';
 export const displayName = 'Kiro';
 export const installHint = 'Install the Kiro CLI (`kiro-cli`) and authenticate it.';
 const ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/gu;
-const HANDOFF_OBJECT_START = /\{\s*"schemaVersion"\s*:\s*"handoff\.provider-output\.v0\.[23]"/gu;
+const HANDOFF_OBJECT_START = /\{\s*"schemaVersion"\s*:\s*"handoff\.provider-output\.v0\.3"/gu;
 
 export function locate() {
   return locateExecutable('kiro-cli', ['~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin']);
@@ -25,13 +25,13 @@ export function pipelinePreflight(bin) {
 
 export function pipelinePolicy(role, { bash } = {}) {
   if (!V03_ROLES.includes(role)) throw new Error(`Kiro pipeline role '${role}' is unsupported`);
-  const legacy = bash === undefined;
+  const implicitGrantMode = bash === undefined;
   return {
     enforcement: 'tool-permission-allowlist',
     filesystem: role === 'build' || role === 'phase' ? 'permission-only-workspace-write' : 'permission-only-read-only-intent',
     nativeFilesystemIsolation: false,
     headlessAuthentication: 'active Kiro session or KIRO_API_KEY, using native CLI precedence',
-    toolAllowlist: legacy ? ['read', 'grep', 'glob'] : ['fs_read', ...((role === 'build' || role === 'phase') ? ['fs_write'] : []), ...(bash ? ['execute_bash'] : [])],
+    toolAllowlist: implicitGrantMode ? ['read', 'grep', 'glob'] : ['fs_read', ...((role === 'build' || role === 'phase') ? ['fs_write'] : []), ...(bash ? ['execute_bash'] : [])],
     mutationGuarantee: 'final-state-detection-only',
   };
 }
@@ -70,7 +70,7 @@ export function pipelineExtractResult(raw) {
   try {
     const exact = JSON.parse(candidate);
     if (exact && typeof exact === 'object' && !Array.isArray(exact)
-      && [PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03].includes(exact.schemaVersion)) {
+      && exact.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION_V03) {
       return { bytes: Buffer.from(candidate), usage: null, usageSource: null };
     }
   } catch { /* try the provider's observed preamble plus terminal-object form below */ }
@@ -104,7 +104,7 @@ export function pipelineExtractResult(raw) {
     try {
       const parsed = JSON.parse(object);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        && [PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03].includes(parsed.schemaVersion)) terminalObjects.push(object);
+        && parsed.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION_V03) terminalObjects.push(object);
     } catch { /* downstream remains fail-closed */ }
   }
   if (terminalObjects.length !== 1) {

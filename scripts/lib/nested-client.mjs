@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
+import { join } from 'node:path';
 
 import { ContractError, decodeUtf8, parseMachineResultV03, sha256 } from './contracts.mjs';
 import { closeReservedResult, reserveResultPath, safeCwd, safeRequestPath, writeReservedResult } from './paths.mjs';
@@ -11,10 +12,11 @@ function contextFromEnvironment(raw = process.env.HANDOFF_SUPERVISOR_CONTEXT) {
   if (!raw || Buffer.byteLength(raw) > 16_384) throw new ContractError('HANDOFF_SUPERVISOR_CONTEXT is missing or oversized');
   let value;
   try { value = JSON.parse(raw); } catch { throw new ContractError('HANDOFF_SUPERVISOR_CONTEXT is malformed'); }
-  const keys = ['schemaVersion', 'endpoint', 'token', 'callerHarness', 'rootRunId'];
+  const keys = ['schemaVersion', 'endpoint', 'token', 'callerHarness', 'rootRunId', 'allowedOperations'];
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key)) || keys.some((key) => !Object.hasOwn(value, key))) throw new ContractError('HANDOFF_SUPERVISOR_CONTEXT has unknown or missing fields');
   if (value.schemaVersion !== 'handoff.supervisor-context.v0.3') throw new ContractError('HANDOFF_SUPERVISOR_CONTEXT version drift');
   for (const key of ['endpoint', 'token', 'callerHarness', 'rootRunId']) if (typeof value[key] !== 'string' || !value[key]) throw new ContractError(`HANDOFF_SUPERVISOR_CONTEXT.${key} is invalid`);
+  if (!Array.isArray(value.allowedOperations) || value.allowedOperations.length !== 1 || value.allowedOperations[0] !== 'advice') throw new ContractError('HANDOFF_SUPERVISOR_CONTEXT.allowedOperations must be exactly ["advice"]');
   return value;
 }
 
@@ -34,6 +36,7 @@ function readMcp(path) {
 }
 
 async function exchange(endpoint, message) {
+  if (endpoint.startsWith('/')) return exchangeMailbox(endpoint, message);
   return new Promise((resolve, reject) => {
     let connection = endpoint;
     if (endpoint.startsWith('tcp://')) {
@@ -63,11 +66,43 @@ async function exchange(endpoint, message) {
   });
 }
 
+function privateDirectory(path, where) {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink() || !stat.isDirectory() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) throw new ContractError(`${where} is not a private directory`);
+}
+
+async function exchangeMailbox(endpoint, message) {
+  privateDirectory(endpoint, 'supervisor mailbox');
+  const requests = join(endpoint, 'requests');
+  const replies = join(endpoint, 'replies');
+  privateDirectory(requests, 'supervisor request mailbox');
+  privateDirectory(replies, 'supervisor reply mailbox');
+  if (typeof message.nonce !== 'string' || !/^[0-9a-f-]{36}$/u.test(message.nonce)) throw new ContractError('supervisor request nonce is invalid');
+  const requestPath = join(requests, `request-${message.nonce}.json`);
+  const temporaryPath = join(requests, `.request-${message.nonce}-${randomUUID()}.tmp`);
+  const replyPath = join(replies, `reply-${message.nonce}.json`);
+  try {
+    writeFileSync(temporaryPath, Buffer.from(JSON.stringify(message)), { mode: 0o600, flag: 'wx' });
+    renameSync(temporaryPath, requestPath);
+    const deadline = Date.now() + 3_600_000;
+    while (!existsSync(replyPath)) {
+      if (Date.now() >= deadline) throw new ContractError('supervisor reply timed out');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const bytes = readFileSync(replyPath);
+    if (bytes.length > MAX_REPLY_BYTES) throw new ContractError('supervisor reply exceeds limit');
+    try { return JSON.parse(bytes.toString('utf8')); }
+    catch { throw new ContractError('supervisor reply is malformed'); }
+  } finally {
+    for (const path of [temporaryPath, requestPath, replyPath]) { try { rmSync(path, { force: true }); } catch { /* exact mailbox artifact only */ } }
+  }
+}
+
 export async function executeNestedRequest(options, { contextRaw } = {}) {
   if (options.callerHarness !== undefined) throw new ContractError('nested requests must not supply --caller-harness');
   if (options.limits && Object.keys(options.limits).length) throw new ContractError('nested requests must not supply root budget flags');
   const context = contextFromEnvironment(contextRaw);
-  if (options.operation === 'handoff' && !['codex', 'claude'].includes(context.callerHarness)) throw new ContractError('derived caller cannot launch a handoff');
+  if (options.operation !== 'advice' || !context.allowedOperations.includes(options.operation)) throw new ContractError('nested requests are limited to advice');
   const reservation = reserveResultPath(options.result);
   try {
     const message = {

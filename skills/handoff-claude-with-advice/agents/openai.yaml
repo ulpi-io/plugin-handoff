@@ -1,0 +1,4 @@
+interface:
+  display_name: "Claude Handoff With Advice"
+  short_description: "Delegate to Claude with optional advice"
+  default_prompt: "Use $handoff-claude-with-advice to delegate this bounded task to Claude and allow read-only consultation."

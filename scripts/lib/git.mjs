@@ -210,7 +210,7 @@ export function gitFingerprint(cwd) {
     .sort(Buffer.compare);
   const changes = parseStatus(root, statusRaw);
   const hash = createHash('sha256');
-  addField(hash, 'schema', 'handoff.git-fingerprint.v0.2');
+  addField(hash, 'schema', 'handoff.git-fingerprint.v0.3');
   addField(hash, 'head', head || 'UNBORN');
   addField(hash, 'index', indexRaw);
   addField(hash, 'status', statusRaw);
@@ -226,7 +226,7 @@ export function gitFingerprint(cwd) {
   }
 
   const fingerprint = {
-    schemaVersion: 'handoff.git-fingerprint.v0.2',
+    schemaVersion: 'handoff.git-fingerprint.v0.3',
     algorithm: 'sha256',
     digest: `sha256:${hash.digest('hex')}`,
     head,

@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "version": "0.4.0",
-  "description": "Supervised cross-harness advice and handoff for Codex, Grok, Kiro, Claude, OpenCode, and Cursor, with pinned model selection, attenuated grants, bounded DAG lineage, structured results, and Git evidence through one bundled MJS authority.",
+  "description": "Cross-harness advice plus explicit plain and with-advice handoff families for Codex, Grok, Kiro, Claude, OpenCode, and Cursor through one fail-closed MJS authority.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"
@@ -13,16 +13,16 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Handoff",
-    "shortDescription": "Get advice or delegate through a supervised DAG",
-    "longDescription": "Ask any supported harness for read-only advice, or hand off one bounded build, phase, review, or verification from Codex or Claude. Every node uses the same fail-closed MJS authority with pinned model and effort receipts, attenuated Bash/web/MCP grants, ephemeral supervised lineage, deterministic Git evidence, and structured results.",
+    "shortDescription": "Choose plain handoff or handoff with advice",
+    "longDescription": "Ask any supported harness for read-only advice, delegate without any nested Handoff authority, or explicitly delegate with an advice-only capability. Every node uses the same current fail-closed MJS authority with pinned model and effort receipts, attenuated Bash/web/MCP grants, bounded lineage, deterministic Git evidence, and structured results.",
     "developerName": "ulpi.io",
     "category": "Developer Tools",
     "capabilities": ["Machine API", "Write"],
     "websiteURL": "https://github.com/ulpi-io/plugin-handoff",
     "defaultPrompt": [
       "Ask Claude Fable for architecture advice at max effort",
-      "Have Codex review the diff in src/auth",
-      "Let Grok build the parser in src/parse.ts"
+      "Have Codex review the diff without nested advice",
+      "Let Grok build the parser and ask Claude for advice if needed"
     ],
     "brandColor": "#6366F1"
   }

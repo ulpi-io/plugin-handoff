@@ -2,21 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { openSync, closeSync, fstatSync, readFileSync } from 'node:fs';
 
 import { resolveGrants } from './capability-grants.mjs';
-import { codexApprovalSubjectHash, createCodexCoordinatorApprovalV03, discoverCoordinatorAgentsRules } from './agents-policy.mjs';
+import { createCodexCoordinatorApprovalV03 } from './agents-policy.mjs';
 import {
   REQUEST_SCHEMA_VERSION_V03,
-  REQUEST_SCHEMA_VERSION,
-  COORDINATOR_APPROVAL_SCHEMA_VERSION,
-  MAX_TURNS_PROVIDERS,
-  WEB_SEARCH_PROVIDERS,
-  PIPELINE_PROVIDER_ROLES,
   canonicalJson,
   decodeUtf8,
   parseMachineRequest,
   sha256,
 } from './contracts.mjs';
 import { safeCwd, safeRequestPath } from './paths.mjs';
-import { resolveBudgets, resolveSelection, validateOperation } from './selection.mjs';
+import { resolveBudgets, resolveDelegation, resolveSelection, validateOperation } from './selection.mjs';
 
 function readStable(path, label) {
   const canonical = safeRequestPath(path);
@@ -32,7 +27,7 @@ function readStable(path, label) {
   }
 }
 
-export function computeIntentHash({ operation, targetHarness, mode = null, cwd, instructions, selection, grants }) {
+export function computeIntentHash({ operation, targetHarness, mode = null, cwd, instructions, selection, grants, delegation }) {
   const semantic = {
     schemaVersion: 'handoff.intent.v0.3',
     operation,
@@ -46,6 +41,7 @@ export function computeIntentHash({ operation, targetHarness, mode = null, cwd, 
       mcpDigest: grants.mcp.digest,
       mcpServers: grants.mcp.servers,
     },
+    delegation,
   };
   return sha256(Buffer.from(canonicalJson(semantic)));
 }
@@ -66,7 +62,11 @@ function initialBudgets(limits, operation) {
 }
 
 export function prepareV03Request(options) {
+  if (Object.hasOwn(options, 'delegation')) throw new Error('delegation is derived and must not be supplied');
   const provenance = options.provenance ?? 'root-asserted';
+  const delegation = resolveDelegation({ verb: options.verb, parent: options.parentDelegation ?? null });
+  const expectedOperation = options.verb === 'advice' ? 'advice' : 'handoff';
+  if (options.operation !== expectedOperation) throw new Error('verb and operation are inconsistent');
   validateOperation({
     operation: options.operation,
     callerHarness: options.callerHarness,
@@ -97,7 +97,7 @@ export function prepareV03Request(options) {
   const limits = options.limits ? resolveBudgets(options.limits) : resolveBudgets();
   const lineage = options.lineage ? structuredClone(options.lineage) : rootLineage(options.runId);
   const budgets = options.budgets ? structuredClone(options.budgets) : initialBudgets(limits, options.operation);
-  const intentHash = computeIntentHash({ operation: options.operation, targetHarness: options.targetHarness, mode: options.mode ?? null, cwd, instructions, selection, grants });
+  const intentHash = computeIntentHash({ operation: options.operation, targetHarness: options.targetHarness, mode: options.mode ?? null, cwd, instructions, selection, grants, delegation });
   const request = {
     schemaVersion: REQUEST_SCHEMA_VERSION_V03,
     operation: options.operation,
@@ -108,6 +108,7 @@ export function prepareV03Request(options) {
     instructions,
     selection,
     grants,
+    delegation,
     lineage,
     budgets,
     intentHash,
@@ -129,37 +130,4 @@ export function prepareV03Request(options) {
     instructionHash: sha256(instructionFile.bytes),
     internal,
   };
-}
-
-export function prepareLegacyRequest(options) {
-  const roles = PIPELINE_PROVIDER_ROLES[options.provider];
-  if (!roles) throw new Error(`--provider must be ${Object.keys(PIPELINE_PROVIDER_ROLES).join('|')}`);
-  if (!roles.includes(options.role)) throw new Error(`--provider ${options.provider} does not support role ${options.role}; allowed roles: ${roles.join('|')}`);
-  if (options.maxTurns !== undefined && !MAX_TURNS_PROVIDERS.includes(options.provider)) throw new Error(`--max-turns is supported only for ${MAX_TURNS_PROVIDERS.join('|')}`);
-  if (options.webSearch !== undefined && !WEB_SEARCH_PROVIDERS.includes(options.provider)) throw new Error(`--web-search is supported only for ${WEB_SEARCH_PROVIDERS.join('|')}`);
-  const cwd = safeCwd(options.cwd);
-  const instructionFile = readStable(options.instructionsPath, 'instructions file');
-  const request = { schemaVersion: REQUEST_SCHEMA_VERSION, instructions: decodeUtf8(instructionFile.bytes, 'instructions file') };
-  if (options.timeoutMs !== undefined) request.timeoutMs = options.timeoutMs;
-  if (options.maxTurns !== undefined) request.maxTurns = options.maxTurns;
-  if (options.webSearch !== undefined) request.webSearch = options.webSearch;
-  if (options.model !== undefined) request.model = options.model;
-  if (options.effort !== undefined) request.effort = options.effort;
-  if (options.provider === 'codex') {
-    const approval = {
-      schemaVersion: COORDINATOR_APPROVAL_SCHEMA_VERSION,
-      approvalId: `handoff-command-${randomUUID()}`,
-      issuer: 'handoff-slash-command',
-      provider: 'codex',
-      role: options.role,
-      cwd,
-      scope: 'all-applicable-agents-rules',
-      rules: discoverCoordinatorAgentsRules(cwd),
-    };
-    approval.subjectHash = codexApprovalSubjectHash({ request, approval });
-    request.coordinatorApproval = approval;
-  }
-  const bytes = Buffer.from(`${JSON.stringify(request)}\n`);
-  parseMachineRequest(bytes);
-  return { request, bytes, requestHash: sha256(bytes), cwd };
 }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCode Handoff"
+  short_description: "Delegate to OpenCode without nested advice"
+  default_prompt: "Use $handoff-opencode to delegate this bounded task to OpenCode with no nested Handoff capability."

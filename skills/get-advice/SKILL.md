@@ -8,8 +8,10 @@ description: Ask any supported Codex, Grok, Kiro, Claude, OpenCode, or Cursor mo
 Use the bundled Node entrypoint. Never invoke a provider CLI directly and never assume a global
 `handoff` executable exists.
 
-Advice is always read-only. A provider response is advice to the current worker, not authorization to
-edit, commit, push, message anyone, or expand scope.
+Advice is always read-only. A root advice request receives an `advice-only` capability so the adviser
+may consult another model, but every nested operation remains read-only advice. A provider response
+is advice to the current worker, not authorization to edit, commit, push, message anyone, or expand
+scope.
 
 ## Prepare the request
 
@@ -43,6 +45,7 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
 
 Use repeatable `--dependency requires:<run-id>`, `--dependency advises:<run-id>`, or
 `--dependency verifies:<run-id>` only for nested work scheduled against already-terminal nodes.
+Nested `run` and `run-with-advice` are forbidden; an adviser can consult but cannot delegate work.
 
 ## Selection and grants
 

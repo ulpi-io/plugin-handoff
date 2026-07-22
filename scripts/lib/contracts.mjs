@@ -6,11 +6,6 @@ import { TextDecoder } from 'node:util';
 
 export const DRIVER_VERSION = '0.4.0';
 export const BUNDLE_VERSION = '0.4.0';
-export const CAPABILITIES_SCHEMA_VERSION = 'handoff.capabilities.v0.2';
-export const REQUEST_SCHEMA_VERSION = 'handoff.request.v0.2';
-export const PROVIDER_OUTPUT_SCHEMA_VERSION = 'handoff.provider-output.v0.2';
-export const RESULT_SCHEMA_VERSION = 'handoff.result.v0.2';
-export const COORDINATOR_APPROVAL_SCHEMA_VERSION = 'handoff.coordinator-approval.v0.2';
 export const CAPABILITIES_SCHEMA_VERSION_V03 = 'handoff.capabilities.v0.3';
 export const REQUEST_SCHEMA_VERSION_V03 = 'handoff.request.v0.3';
 export const PROVIDER_OUTPUT_SCHEMA_VERSION_V03 = 'handoff.provider-output.v0.3';
@@ -19,21 +14,11 @@ export const DAG_SCHEMA_VERSION_V03 = 'handoff.dag.v0.3';
 export const MCP_SCHEMA_VERSION_V03 = 'handoff.mcp.v0.3';
 export const COORDINATOR_APPROVAL_SCHEMA_VERSION_V03 = 'handoff.coordinator-approval.v0.3';
 export const ROLES = Object.freeze(['build', 'phase', 'review', 'verify']);
-export const PIPELINE_PROVIDER_ROLES = Object.freeze({
-  codex: Object.freeze(['build', 'phase', 'review', 'verify']),
-  grok: Object.freeze(['build', 'phase', 'review', 'verify']),
-  kiro: Object.freeze(['review', 'verify']),
-  claude: Object.freeze(['build', 'phase', 'review', 'verify']),
-  opencode: Object.freeze(['build', 'phase', 'review', 'verify']),
-  cursor: Object.freeze(['build', 'phase', 'review', 'verify']),
-});
-export const PIPELINE_PROVIDERS = Object.freeze(Object.keys(PIPELINE_PROVIDER_ROLES));
+export const PIPELINE_PROVIDERS = Object.freeze(['codex', 'grok', 'kiro', 'claude', 'opencode', 'cursor']);
 export const DEFAULT_TIMEOUT_MS = 600_000;
 export const DEFAULT_MAX_TURNS = 12;
 export const MIN_MAX_TURNS = 1;
 export const MAX_MAX_TURNS = 100;
-export const MAX_TURNS_PROVIDERS = Object.freeze(['grok', 'claude']);
-export const WEB_SEARCH_PROVIDERS = Object.freeze(['grok']);
 export const MAX_REQUEST_BYTES = 2_000_000;
 export const MAX_PROVIDER_OUTPUT_BYTES = 256_000;
 export const MAX_CAPTURE_BYTES = 1_048_576;
@@ -41,8 +26,6 @@ export const MAX_DIAGNOSTIC_BYTES = 8_192;
 const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const PROVIDER_OUTPUT_SCHEMA_PATH = resolve(here, '../../contracts/v0.2/provider-output.schema.json');
-export const PROVIDER_OUTPUT_SCHEMA = JSON.parse(readFileSync(PROVIDER_OUTPUT_SCHEMA_PATH, 'utf8'));
 export const PROVIDER_OUTPUT_SCHEMA_PATH_V03 = resolve(here, '../../contracts/v0.3/provider-output.schema.json');
 export const PROVIDER_OUTPUT_SCHEMA_V03 = JSON.parse(readFileSync(PROVIDER_OUTPUT_SCHEMA_PATH_V03, 'utf8'));
 
@@ -145,19 +128,17 @@ function isAgentsFilename(value) {
   return name === 'AGENTS.md' || name === 'AGENTS.override.md';
 }
 
-function validateCoordinatorApproval(value, expectedVersion = COORDINATOR_APPROVAL_SCHEMA_VERSION) {
+function validateCoordinatorApproval(value) {
   plainObject(value, 'request.coordinatorApproval');
-  const v03 = expectedVersion === COORDINATOR_APPROVAL_SCHEMA_VERSION_V03;
-  const fields = ['schemaVersion', 'approvalId', 'issuer', 'provider', 'role', 'cwd', 'scope', 'subjectHash', 'rules'];
-  if (v03) fields.splice(8, 0, 'requestHash');
+  const fields = ['schemaVersion', 'approvalId', 'issuer', 'provider', 'role', 'cwd', 'scope', 'subjectHash', 'requestHash', 'rules'];
   exactKeys(
     value,
     fields,
     fields,
     'request.coordinatorApproval',
   );
-  if (value.schemaVersion !== expectedVersion) {
-    throw new ContractError(`request.coordinatorApproval.schemaVersion must be '${expectedVersion}'`);
+  if (value.schemaVersion !== COORDINATOR_APPROVAL_SCHEMA_VERSION_V03) {
+    throw new ContractError(`request.coordinatorApproval.schemaVersion must be '${COORDINATOR_APPROVAL_SCHEMA_VERSION_V03}'`);
   }
   safeCliValue(value.approvalId, 'request.coordinatorApproval.approvalId', 256);
   safeCliValue(value.issuer, 'request.coordinatorApproval.issuer', 256);
@@ -170,7 +151,7 @@ function validateCoordinatorApproval(value, expectedVersion = COORDINATOR_APPROV
   if (typeof value.subjectHash !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value.subjectHash)) {
     throw new ContractError('request.coordinatorApproval.subjectHash must be a SHA-256 digest');
   }
-  if (v03) digest(value.requestHash, 'request.coordinatorApproval.requestHash');
+  digest(value.requestHash, 'request.coordinatorApproval.requestHash');
   if (!Array.isArray(value.rules) || value.rules.length > 128) {
     throw new ContractError('request.coordinatorApproval.rules must be an array with at most 128 entries');
   }
@@ -213,32 +194,6 @@ function parseBoundedJson(raw, where, maxBytes, code = 'invalid_contract') {
   return value;
 }
 
-function validateMachineRequestV02(value) {
-  exactKeys(
-    value,
-    ['schemaVersion', 'instructions', 'timeoutMs', 'maxTurns', 'webSearch', 'model', 'effort', 'coordinatorApproval'],
-    ['schemaVersion', 'instructions'],
-    'request',
-  );
-  if (value.schemaVersion !== REQUEST_SCHEMA_VERSION) {
-    throw new ContractError(`request.schemaVersion must be '${REQUEST_SCHEMA_VERSION}'`);
-  }
-  boundedString(value.instructions, 'request.instructions', MAX_REQUEST_BYTES);
-  if (value.timeoutMs !== undefined && (!Number.isInteger(value.timeoutMs) || value.timeoutMs < 100 || value.timeoutMs > 3_600_000)) {
-    throw new ContractError('request.timeoutMs must be an integer from 100 through 3600000');
-  }
-  if (value.maxTurns !== undefined && (!Number.isInteger(value.maxTurns) || value.maxTurns < MIN_MAX_TURNS || value.maxTurns > MAX_MAX_TURNS)) {
-    throw new ContractError(`request.maxTurns must be an integer from ${MIN_MAX_TURNS} through ${MAX_MAX_TURNS}`);
-  }
-  if (value.webSearch !== undefined && typeof value.webSearch !== 'boolean') {
-    throw new ContractError('request.webSearch must be a boolean');
-  }
-  if (value.model !== undefined) safeCliValue(value.model, 'request.model', 256);
-  if (value.effort !== undefined) safeCliValue(value.effort, 'request.effort', 64);
-  if (value.coordinatorApproval !== undefined) validateCoordinatorApproval(value.coordinatorApproval);
-  return value;
-}
-
 function digest(value, where, { nullable = false } = {}) {
   if (nullable && value === null) return value;
   if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value)) throw new ContractError(`${where} must be a SHA-256 digest`);
@@ -251,6 +206,15 @@ function harness(value, where) {
 
 function booleanField(value, where) {
   if (typeof value !== 'boolean') throw new ContractError(`${where} must be a boolean`);
+}
+
+export function validateDelegation(value, where = 'request.delegation', { allowNull = false } = {}) {
+  if (allowNull && value === null) return value;
+  plainObject(value, where);
+  exactKeys(value, ['mode', 'provenance'], ['mode', 'provenance'], where);
+  if (!['none', 'advice-only'].includes(value.mode)) throw new ContractError(`${where}.mode must be none|advice-only`);
+  if (!['verb-derived', 'parent-attenuated'].includes(value.provenance)) throw new ContractError(`${where}.provenance must be verb-derived|parent-attenuated`);
+  return value;
 }
 
 function validateSelection(value) {
@@ -324,7 +288,7 @@ function validateRemaining(value, limits, where) {
 }
 
 function validateMachineRequestV03(value) {
-  const keys = ['schemaVersion', 'operation', 'caller', 'target', 'mode', 'cwd', 'instructions', 'selection', 'grants', 'lineage', 'budgets', 'intentHash', 'coordinatorApproval'];
+  const keys = ['schemaVersion', 'operation', 'caller', 'target', 'mode', 'cwd', 'instructions', 'selection', 'grants', 'delegation', 'lineage', 'budgets', 'intentHash', 'coordinatorApproval'];
   exactKeys(value, keys, keys.filter((key) => key !== 'coordinatorApproval'), 'request');
   if (value.schemaVersion !== REQUEST_SCHEMA_VERSION_V03) throw new ContractError(`request.schemaVersion must be '${REQUEST_SCHEMA_VERSION_V03}'`);
   if (!['advice', 'handoff'].includes(value.operation)) throw new ContractError('request.operation must be advice|handoff');
@@ -346,6 +310,7 @@ function validateMachineRequestV03(value) {
   boundedString(value.instructions, 'request.instructions', MAX_REQUEST_BYTES);
   validateSelection(value.selection);
   validateGrants(value.grants);
+  validateDelegation(value.delegation);
   if ((value.mode === 'review' || value.mode === 'verify') && value.grants.resolved.write) throw new ContractError(`${value.mode} cannot receive write authority`);
   plainObject(value.lineage, 'request.lineage');
   exactKeys(value.lineage, ['rootRunId', 'runId', 'parentRunId', 'depth', 'dependencies'], ['rootRunId', 'runId', 'parentRunId', 'depth', 'dependencies'], 'request.lineage');
@@ -356,21 +321,23 @@ function validateMachineRequestV03(value) {
   validateDependencies(value.lineage.dependencies);
   if (value.caller.provenance === 'root-asserted' && (value.lineage.depth !== 0 || value.lineage.parentRunId !== null || value.lineage.rootRunId !== value.lineage.runId)) throw new ContractError('root caller lineage is inconsistent');
   if (value.caller.provenance === 'supervisor-derived' && (value.lineage.depth < 1 || value.lineage.parentRunId === null)) throw new ContractError('nested caller lineage is inconsistent');
+  if (value.caller.provenance === 'root-asserted' && value.delegation.provenance !== 'verb-derived') throw new ContractError('root delegation must be verb-derived');
+  if (value.caller.provenance === 'supervisor-derived' && (value.operation !== 'advice' || value.delegation.mode !== 'advice-only' || value.delegation.provenance !== 'parent-attenuated')) throw new ContractError('nested delegation must be parent-attenuated advice-only');
+  if (value.operation === 'advice' && value.delegation.mode !== 'advice-only') throw new ContractError('advice must expose advice-only delegation');
   plainObject(value.budgets, 'request.budgets');
   exactKeys(value.budgets, ['limits', 'remaining'], ['limits', 'remaining'], 'request.budgets');
   validateLimits(value.budgets.limits, 'request.budgets.limits');
   validateRemaining(value.budgets.remaining, value.budgets.limits, 'request.budgets.remaining');
   if (value.lineage.depth > value.budgets.limits.maxDepth) throw new ContractError('request depth exceeds maxDepth');
   digest(value.intentHash, 'request.intentHash');
-  if (value.coordinatorApproval !== undefined) validateCoordinatorApproval(value.coordinatorApproval, COORDINATOR_APPROVAL_SCHEMA_VERSION_V03);
+  if (value.coordinatorApproval !== undefined) validateCoordinatorApproval(value.coordinatorApproval);
   return value;
 }
 
 export function parseMachineRequest(raw) {
   const value = parseBoundedJson(raw, 'request file', MAX_REQUEST_BYTES);
-  if (value.schemaVersion === REQUEST_SCHEMA_VERSION) return validateMachineRequestV02(value);
   if (value.schemaVersion === REQUEST_SCHEMA_VERSION_V03) return validateMachineRequestV03(value);
-  throw new ContractError(`request.schemaVersion must be '${REQUEST_SCHEMA_VERSION}' or '${REQUEST_SCHEMA_VERSION_V03}'`);
+  throw new ContractError(`request.schemaVersion must be '${REQUEST_SCHEMA_VERSION_V03}'`);
 }
 
 function validateUsage(value) {
@@ -383,55 +350,11 @@ function validateUsage(value) {
   }
 }
 
-function parseProviderOutputV02Unchecked(raw) {
-  if (!Buffer.isBuffer(raw)) raw = Buffer.from(raw || '');
-  if (raw.length === 0) throw new ContractError('provider output is missing', 'invalid_provider_output');
-  if (raw.length > MAX_PROVIDER_OUTPUT_BYTES) {
-    throw new ContractError(`provider output exceeds ${MAX_PROVIDER_OUTPUT_BYTES} bytes`, 'invalid_provider_output');
-  }
-  let value;
-  const text = decodeUtf8(raw, 'provider output', 'invalid_provider_output');
-  try { value = JSON.parse(text); }
-  catch { throw new ContractError('provider output must be exactly one JSON object with no prose or noise', 'invalid_provider_output'); }
-  plainObject(value, 'provider output');
-  exactKeys(
-    value,
-    ['schemaVersion', 'status', 'summary', 'evidence', 'findings', 'usage'],
-    ['schemaVersion', 'status', 'summary', 'evidence', 'findings', 'usage'],
-    'provider output',
-  );
-  if (value.schemaVersion !== PROVIDER_OUTPUT_SCHEMA_VERSION) {
-    throw new ContractError(`provider output schema drift: expected '${PROVIDER_OUTPUT_SCHEMA_VERSION}'`, 'invalid_provider_output');
-  }
-  if (!['completed', 'blocked', 'failed'].includes(value.status)) throw new ContractError('provider output.status is unsupported', 'invalid_provider_output');
-  boundedString(value.summary, 'provider output.summary', 32_768);
-  if (!Array.isArray(value.evidence) || value.evidence.length > 1000) throw new ContractError('provider output.evidence must be a bounded array', 'invalid_provider_output');
-  if (!Array.isArray(value.findings) || value.findings.length > 1000) throw new ContractError('provider output.findings must be a bounded array', 'invalid_provider_output');
-  for (const [index, item] of value.evidence.entries()) {
-    plainObject(item, `provider output.evidence[${index}]`);
-    exactKeys(item, ['kind', 'path', 'summary'], ['kind', 'summary'], `provider output.evidence[${index}]`);
-    boundedString(item.kind, `provider output.evidence[${index}].kind`, 64);
-    boundedString(item.summary, `provider output.evidence[${index}].summary`, 8192);
-    if (item.path !== undefined) safeRepoRelativePath(item.path, `provider output.evidence[${index}].path`);
-  }
-  for (const [index, item] of value.findings.entries()) {
-    plainObject(item, `provider output.findings[${index}]`);
-    exactKeys(item, ['file', 'line', 'severity', 'summary'], ['severity', 'summary'], `provider output.findings[${index}]`);
-    if (item.file !== undefined) safeRepoRelativePath(item.file, `provider output.findings[${index}].file`);
-    if (item.line !== undefined && (!Number.isInteger(item.line) || item.line < 1)) throw new ContractError(`provider output.findings[${index}].line must be a positive integer`, 'invalid_provider_output');
-    if (!['blocker', 'high', 'medium', 'low', 'nit'].includes(item.severity)) throw new ContractError(`provider output.findings[${index}].severity is unsupported`, 'invalid_provider_output');
-    boundedString(item.summary, `provider output.findings[${index}].summary`, 8192);
-  }
-  validateUsage(value.usage);
-  return value;
-}
-
 export function parseProviderOutput(raw) {
   try {
     const probe = parseBoundedJson(raw, 'provider output', MAX_PROVIDER_OUTPUT_BYTES, 'invalid_provider_output');
-    if (probe.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION) return parseProviderOutputV02Unchecked(raw);
     if (probe.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION_V03) return validateProviderOutputV03(probe);
-    throw new ContractError(`provider output schema drift: expected '${PROVIDER_OUTPUT_SCHEMA_VERSION}' or '${PROVIDER_OUTPUT_SCHEMA_VERSION_V03}'`, 'invalid_provider_output');
+    throw new ContractError(`provider output schema drift: expected '${PROVIDER_OUTPUT_SCHEMA_VERSION_V03}'`, 'invalid_provider_output');
   } catch (error) {
     if (error instanceof ContractError) {
       if (error.message === 'provider output is not valid JSON') {
@@ -546,7 +469,7 @@ export function parseDagSnapshot(raw) {
   for (const [index, node] of value.nodes.entries()) {
     const where = `DAG snapshot.nodes[${index}]`;
     plainObject(node, where);
-    const nodeKeys = ['runId', 'parentRunId', 'depth', 'operation', 'callerHarness', 'targetHarness', 'mode', 'intentHash', 'dependencies', 'state', 'requestHash', 'resultHash', 'startedAt', 'finishedAt'];
+    const nodeKeys = ['runId', 'parentRunId', 'depth', 'operation', 'callerHarness', 'targetHarness', 'mode', 'delegation', 'intentHash', 'dependencies', 'state', 'requestHash', 'resultHash', 'startedAt', 'finishedAt'];
     exactKeys(node, nodeKeys, nodeKeys, where);
     safeCliValue(node.runId, `${where}.runId`, 128);
     if (ids.has(node.runId)) throw new ContractError('DAG snapshot contains duplicate run IDs');
@@ -558,6 +481,10 @@ export function parseDagSnapshot(raw) {
     harness(node.callerHarness, `${where}.callerHarness`);
     harness(node.targetHarness, `${where}.targetHarness`);
     if (node.operation === 'advice' ? node.mode !== null : !ROLES.includes(node.mode)) throw new ContractError(`${where}.mode is invalid`);
+    validateDelegation(node.delegation, `${where}.delegation`);
+    if (node.parentRunId === null && node.delegation.provenance !== 'verb-derived') throw new ContractError(`${where}.delegation must be verb-derived for a root node`);
+    if (node.parentRunId !== null && (node.operation !== 'advice' || node.delegation.mode !== 'advice-only' || node.delegation.provenance !== 'parent-attenuated')) throw new ContractError(`${where}.delegation must be parent-attenuated advice-only for a nested node`);
+    if (node.operation === 'advice' && node.delegation.mode !== 'advice-only') throw new ContractError(`${where}.delegation must be advice-only for advice`);
     digest(node.intentHash, `${where}.intentHash`);
     validateDependencies(node.dependencies, `${where}.dependencies`);
     if (!['pending', 'running', 'succeeded', 'blocked', 'failed', 'timed_out', 'cancelled', 'rejected', 'not_run'].includes(node.state)) throw new ContractError(`${where}.state is invalid`);
@@ -577,7 +504,7 @@ export function parseDagSnapshot(raw) {
 
 export function parseMachineResultV03(raw) {
   const value = parseBoundedJson(raw, 'result', MAX_REQUEST_BYTES);
-  const keys = ['schemaVersion', 'driverVersion', 'bundleVersion', 'bundleDigest', 'operation', 'caller', 'target', 'mode', 'requestHash', 'intentHash', 'selection', 'grants', 'lineage', 'status', 'exit', 'output', 'git', 'timing', 'usage', 'policy', 'dag', 'diagnostics'];
+  const keys = ['schemaVersion', 'driverVersion', 'bundleVersion', 'bundleDigest', 'operation', 'caller', 'target', 'mode', 'requestHash', 'intentHash', 'selection', 'grants', 'delegation', 'lineage', 'status', 'exit', 'output', 'git', 'timing', 'usage', 'policy', 'dag', 'diagnostics'];
   exactKeys(value, keys, keys, 'result');
   if (value.schemaVersion !== RESULT_SCHEMA_VERSION_V03 || value.driverVersion !== DRIVER_VERSION || value.bundleVersion !== BUNDLE_VERSION) throw new ContractError('result version drift');
   digest(value.bundleDigest, 'result.bundleDigest');
@@ -591,6 +518,12 @@ export function parseMachineResultV03(raw) {
   harness(value.target.harness, 'result.target.harness');
   if (value.target.version !== null) boundedString(value.target.version, 'result.target.version', 256);
   if (value.operation === 'advice' ? value.mode !== null : !ROLES.includes(value.mode)) throw new ContractError('result.mode is invalid');
+  validateDelegation(value.delegation, 'result.delegation', { allowNull: true });
+  if (value.delegation !== null) {
+    if (value.caller.provenance === 'root-asserted' && value.delegation.provenance !== 'verb-derived') throw new ContractError('result root delegation must be verb-derived');
+    if (value.caller.provenance === 'supervisor-derived' && (value.operation !== 'advice' || value.delegation.mode !== 'advice-only' || value.delegation.provenance !== 'parent-attenuated')) throw new ContractError('result nested delegation must be parent-attenuated advice-only');
+    if (value.operation === 'advice' && value.delegation.mode !== 'advice-only') throw new ContractError('result advice delegation must be advice-only');
+  }
   digest(value.requestHash, 'result.requestHash', { nullable: true });
   digest(value.intentHash, 'result.intentHash', { nullable: true });
   if (!['succeeded', 'blocked', 'failed', 'timed_out', 'cancelled', 'rejected', 'not_run'].includes(value.status)) throw new ContractError('result.status is invalid');

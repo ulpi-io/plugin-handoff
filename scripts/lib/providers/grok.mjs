@@ -7,7 +7,6 @@ import {
   DEFAULT_MAX_TURNS,
   MAX_MAX_TURNS,
   MIN_MAX_TURNS,
-  PROVIDER_OUTPUT_SCHEMA_VERSION,
   PROVIDER_OUTPUT_SCHEMA_VERSION_V03,
   decodeUtf8,
 } from '../contracts.mjs';
@@ -103,7 +102,7 @@ export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, webSearch = f
 
 export function pipelineInvocation({ bin, role, cwd, promptFile, model, effort, schemaJson, maxTurns, webSearch, bash }) {
   const writable = role === 'build' || role === 'phase';
-  const legacy = bash === undefined;
+  const implicitGrantMode = bash === undefined;
   const policy = pipelinePolicy(role, maxTurns ?? DEFAULT_MAX_TURNS, webSearch ?? false, bash ?? writable);
   const args = [
     '--prompt-file', promptFile,
@@ -116,7 +115,7 @@ export function pipelineInvocation({ bin, role, cwd, promptFile, model, effort, 
     '--verbatim',
   ];
   if (!policy.webSearch) args.push('--disable-web-search');
-  if (!(legacy && writable)) {
+  if (!(implicitGrantMode && writable)) {
     args.push('--tools', policy.toolAllowlist.join(','));
     for (const rule of policy.toolDenylist) args.push('--deny', rule);
     if (policy.webSearch) args.push('--allow', 'WebFetch(*)');
@@ -152,7 +151,7 @@ export function pipelineExtractResult(raw) {
   catch { throw new ContractError('Grok output must be exactly one JSON object', 'invalid_provider_output'); }
 
   // Preserve compatibility with Grok releases that emitted the schema object directly.
-  if (plainObject(envelope) && [PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03].includes(envelope.schemaVersion)) {
+  if (plainObject(envelope) && envelope.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION_V03) {
     return { bytes: Buffer.from(text.trim()), usage: null, usageSource: null };
   }
 

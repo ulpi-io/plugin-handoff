@@ -12,8 +12,11 @@ const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 test('sealed root handoff carries exact routing, selection, grants, budgets, and response', () => {
   const context = setupV03();
   try {
+    const invocationCapture = join(context.root, 'plain-invocation.json');
+    const promptCapture = join(context.root, 'plain-prompt.txt');
     const { proc, parsed } = invokeV03(context, {
       operation: 'run', caller: 'codex', target: 'grok', mode: 'build',
+      extraEnv: { HANDOFF_FAKE_INVOCATION_CAPTURE: invocationCapture, HANDOFF_FAKE_PROMPT_CAPTURE: promptCapture },
       extraArgs: [
         '--model', 'grok-code-fast', '--effort', 'high', '--max-turns', '12',
         '--bash', 'true', '--web-search', 'false', '--max-depth', '2',
@@ -31,9 +34,34 @@ test('sealed root handoff carries exact routing, selection, grants, budgets, and
     assert.equal(parsed.selection.resolved.maxTurns, 12);
     assert.equal(parsed.grants.resolved.write, true);
     assert.equal(parsed.grants.resolved.webSearch, false);
+    assert.deepEqual(parsed.delegation, { mode: 'none', provenance: 'verb-derived' });
     assert.equal(parsed.output.response, 'fake build completed');
     assert.equal(parsed.git.changed, true);
     assert.equal(parsed.dag.limits.maxNodes, 4);
+    assert.equal(Object.hasOwn(JSON.parse(readFileSync(invocationCapture, 'utf8')).env, 'HANDOFF_SUPERVISOR_CONTEXT'), false);
+    assert.match(readFileSync(promptCapture, 'utf8'), /No nested supervisor capability is available/u);
+  } finally { cleanupV03(context); }
+});
+
+test('run-with-advice exposes only the advice affordance and receipt', () => {
+  const context = setupV03();
+  try {
+    const invocationCapture = join(context.root, 'enabled-invocation.json');
+    const promptCapture = join(context.root, 'enabled-prompt.txt');
+    const { proc, parsed } = invokeV03(context, {
+      operation: 'run-with-advice', caller: 'claude', target: 'grok', mode: 'review',
+      resultName: 'enabled.json',
+      extraEnv: { HANDOFF_FAKE_INVOCATION_CAPTURE: invocationCapture, HANDOFF_FAKE_PROMPT_CAPTURE: promptCapture },
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.deepEqual(parsed.delegation, { mode: 'advice-only', provenance: 'verb-derived' });
+    const captured = JSON.parse(readFileSync(invocationCapture, 'utf8'));
+    assert.equal(typeof captured.env.HANDOFF_SUPERVISOR_CONTEXT, 'string');
+    const supervisor = JSON.parse(captured.env.HANDOFF_SUPERVISOR_CONTEXT);
+    assert.deepEqual(supervisor.allowedOperations, ['advice']);
+    const prompt = readFileSync(promptCapture, 'utf8');
+    assert.match(prompt, /only delegated supervisor operation is nested read-only advice/u);
+    assert.match(prompt, /Do not invoke run or run-with-advice/u);
   } finally { cleanupV03(context); }
 });
 
@@ -60,6 +88,25 @@ test('wrong root routing and unsupported selection fail before a provider launch
       assert.equal(JSON.parse(proc.stdout).status, 'rejected');
     } finally { cleanupV03(context); }
   }
+});
+
+test('removed machine command and version-selection forms reject without a provider launch', () => {
+  const context = setupV03();
+  try {
+    const marker = join(context.root, 'removed-provider-invoked');
+    for (const args of [
+      [DRIVER, 'run', '--provider', 'grok', '--role', 'review', '--cwd', context.repo, '--request', context.instructions, '--result', join(context.root, 'legacy.json')],
+      [DRIVER, 'capabilities', '--json', '--version', 'v0.3'],
+    ]) {
+      const proc = spawnSync(process.execPath, args, {
+        cwd: context.repo, encoding: 'utf8',
+        env: { ...process.env, PATH: `${context.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+      });
+      assert.equal(proc.status, 5, proc.stderr);
+      assert.equal(JSON.parse(proc.stdout).status, 'rejected');
+      assert.equal(existsSync(marker), false);
+    }
+  } finally { cleanupV03(context); }
 });
 
 test('bundle drift, provider failure, malformed output, and occupied results are non-green', () => {

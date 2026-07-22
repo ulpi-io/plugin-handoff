@@ -13,20 +13,20 @@ const instructionsPath = new URL('../README.md', import.meta.url).pathname;
 test('DAG registration is atomic, dependency-aware, and rejects ancestor intent repetition', () => {
   const temp = mkdtempSync(join(tmpdir(), 'handoff-dag-test-'));
   try {
-    const root = prepareV03Request({ operation: 'advice', callerHarness: 'grok', targetHarness: 'claude', cwd, instructionsPath, tempRoot: temp });
+    const root = prepareV03Request({ verb: 'advice', operation: 'advice', callerHarness: 'grok', targetHarness: 'claude', cwd, instructionsPath, tempRoot: temp });
     const auditPath = join(temp, 'dag.json');
     const store = new DagStore({ rootRequest: root.request, auditPath });
     const child = prepareV03Request({
-      operation: 'advice', callerHarness: 'claude', targetHarness: 'grok', cwd, instructionsPath, tempRoot: temp,
-      provenance: 'supervisor-derived', parentGrants: root.request.grants,
+      verb: 'advice', operation: 'advice', callerHarness: 'claude', targetHarness: 'grok', cwd, instructionsPath, tempRoot: temp,
+      provenance: 'supervisor-derived', parentGrants: root.request.grants, parentDelegation: root.request.delegation,
       lineage: { rootRunId: root.request.lineage.runId, runId: 'child', parentRunId: root.request.lineage.runId, depth: 1, dependencies: [] },
       limits: root.request.budgets.limits, budgets: root.request.budgets,
     });
     store.register(child.request, child.requestHash);
     const before = readFileSync(auditPath);
     const repeat = prepareV03Request({
-      operation: 'advice', callerHarness: 'grok', targetHarness: 'grok', cwd, instructionsPath, tempRoot: temp,
-      provenance: 'supervisor-derived', parentGrants: child.request.grants,
+      verb: 'advice', operation: 'advice', callerHarness: 'grok', targetHarness: 'grok', cwd, instructionsPath, tempRoot: temp,
+      provenance: 'supervisor-derived', parentGrants: child.request.grants, parentDelegation: child.request.delegation,
       lineage: { rootRunId: root.request.lineage.runId, runId: 'repeat', parentRunId: 'child', depth: 2, dependencies: [] },
       limits: root.request.budgets.limits, budgets: root.request.budgets,
     });

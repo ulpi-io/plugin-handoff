@@ -4,7 +4,7 @@
   "title": "Handoff v0.3 operation request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "operation", "caller", "target", "mode", "cwd", "instructions", "selection", "grants", "lineage", "budgets", "intentHash"],
+  "required": ["schemaVersion", "operation", "caller", "target", "mode", "cwd", "instructions", "selection", "grants", "delegation", "lineage", "budgets", "intentHash"],
   "properties": {
     "schemaVersion": { "const": "handoff.request.v0.3" },
     "operation": { "enum": ["advice", "handoff"] },
@@ -15,6 +15,7 @@
     "instructions": { "type": "string", "minLength": 1, "maxLength": 2000000 },
     "selection": { "$ref": "#/$defs/selection" },
     "grants": { "$ref": "#/$defs/grants" },
+    "delegation": { "$ref": "#/$defs/delegation" },
     "lineage": { "$ref": "#/$defs/lineage" },
     "budgets": { "$ref": "#/$defs/budgets" },
     "intentHash": { "$ref": "#/$defs/hash" },
@@ -30,6 +31,29 @@
         }
       },
       "else": { "properties": { "mode": { "enum": ["build", "phase", "review", "verify"] } } }
+    },
+    {
+      "if": { "properties": { "caller": { "properties": { "provenance": { "const": "supervisor-derived" } } } } },
+      "then": {
+        "properties": {
+          "operation": { "const": "advice" },
+          "delegation": {
+            "properties": {
+              "mode": { "const": "advice-only" },
+              "provenance": { "const": "parent-attenuated" }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "delegation": { "properties": { "provenance": { "const": "verb-derived" } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "operation": { "const": "advice" } } },
+      "then": { "properties": { "delegation": { "properties": { "mode": { "const": "advice-only" } } } } }
     }
   ],
   "$defs": {
@@ -122,6 +146,14 @@
         "resolved": { "$ref": "#/$defs/grantBooleansResolved" },
         "provenance": { "$ref": "#/$defs/grantProvenance" },
         "mcp": { "$ref": "#/$defs/mcpReceipt" }
+      }
+    },
+    "delegation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "provenance"],
+      "properties": {
+        "mode": { "enum": ["none", "advice-only"] },
+        "provenance": { "enum": ["verb-derived", "parent-attenuated"] }
       }
     },
     "dependency": {

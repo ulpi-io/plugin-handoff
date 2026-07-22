@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMachineRequest } from './lib/contracts.mjs';
-import { resolveBudgets, resolveSelection, validateOperation } from './lib/selection.mjs';
+import { resolveBudgets, resolveDelegation, resolveSelection, validateOperation } from './lib/selection.mjs';
 
 test('selection defaults and provenance are pinned per operation and harness', () => {
   assert.deepEqual(resolveSelection({ operation: 'advice', targetHarness: 'claude' }), {
@@ -22,8 +22,17 @@ test('caller and operation combinations fail closed', () => {
   assert.deepEqual(resolveBudgets(), { maxDepth: 3, maxNodes: 16, maxAdviceNodes: 12, maxHandoffNodes: 4, maxConcurrency: 4, rootTimeoutMs: 1800000, timeoutMs: 600000 });
 });
 
-test('v0.2 request parsing remains exact and rejects mixed versions', () => {
+test('delegation is derived from the root verb or attenuated parent only', () => {
+  assert.deepEqual(resolveDelegation({ verb: 'run' }), { mode: 'none', provenance: 'verb-derived' });
+  assert.deepEqual(resolveDelegation({ verb: 'run-with-advice' }), { mode: 'advice-only', provenance: 'verb-derived' });
+  assert.deepEqual(resolveDelegation({ verb: 'advice' }), { mode: 'advice-only', provenance: 'verb-derived' });
+  assert.deepEqual(resolveDelegation({ verb: 'advice', parent: { mode: 'advice-only' } }), { mode: 'advice-only', provenance: 'parent-attenuated' });
+  assert.throws(() => resolveDelegation({ verb: 'run', parent: { mode: 'advice-only' } }), /advice only/);
+  assert.throws(() => resolveDelegation({ verb: 'advice', parent: { mode: 'none' } }), /advice-only parent/);
+  assert.throws(() => resolveDelegation({ verb: 'legacy-run' }), /root verb/);
+});
+
+test('legacy requests are rejected without a compatibility fallback', () => {
   const legacy = Buffer.from('{"schemaVersion":"handoff.request.v0.2","instructions":"review"}\n');
-  assert.deepEqual(parseMachineRequest(legacy), { schemaVersion: 'handoff.request.v0.2', instructions: 'review' });
-  assert.throws(() => parseMachineRequest(Buffer.from('{"schemaVersion":"handoff.request.v0.2","instructions":"review","operation":"advice"}')), /unknown field/);
+  assert.throws(() => parseMachineRequest(legacy), /v0.3/);
 });

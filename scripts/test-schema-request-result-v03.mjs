@@ -7,7 +7,7 @@ const cwd = process.cwd();
 const instructionsPath = new URL('../README.md', import.meta.url).pathname;
 
 function prepared(operation = 'advice') {
-  return prepareV03Request({ operation, callerHarness: 'claude', targetHarness: 'grok', mode: operation === 'handoff' ? 'review' : null, cwd, instructionsPath, tempRoot: '/tmp' });
+  return prepareV03Request({ verb: operation === 'advice' ? 'advice' : 'run', operation, callerHarness: 'claude', targetHarness: 'grok', mode: operation === 'handoff' ? 'review' : null, cwd, instructionsPath, tempRoot: '/tmp' });
 }
 
 test('root advice and handoff requests validate with explicit provenance', () => {
@@ -32,7 +32,7 @@ test('terminal v0.3 results define response semantics', () => {
   const result = {
     schemaVersion: 'handoff.result.v0.3', driverVersion: '0.4.0', bundleVersion: '0.4.0', bundleDigest: `sha256:${'0'.repeat(64)}`,
     operation: 'advice', caller: request.caller, target: { harness: 'grok', version: 'fake' }, mode: null,
-    requestHash: `sha256:${'1'.repeat(64)}`, intentHash: request.intentHash, selection: request.selection, grants: request.grants, lineage: request.lineage,
+    requestHash: `sha256:${'1'.repeat(64)}`, intentHash: request.intentHash, selection: request.selection, grants: request.grants, delegation: request.delegation, lineage: request.lineage,
     status: 'succeeded', exit: { driver: 0, provider: 0, signal: null, timedOut: false, cancelled: false },
     output: { response: 'The answer.', evidence: [], findings: [] }, git: {},
     timing: { startedAt: new Date(0).toISOString(), finishedAt: new Date(1).toISOString(), durationMs: 1 },

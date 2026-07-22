@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grok Handoff"
+  short_description: "Delegate to Grok without nested advice"
+  default_prompt: "Use $handoff-grok to delegate this bounded task to Grok with no nested Handoff capability."

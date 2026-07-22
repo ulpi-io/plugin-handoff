@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cursor Handoff"
+  short_description: "Delegate to Cursor without nested advice"
+  default_prompt: "Use $handoff-cursor to delegate this bounded task to Cursor with no nested Handoff capability."

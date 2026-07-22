@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "version": "0.4.0",
-  "description": "Supervised cross-harness advice and handoff for Codex, Grok, Kiro, Claude, OpenCode, and Cursor, with pinned model selection, attenuated grants, bounded DAG lineage, structured results, and Git evidence through one bundled MJS authority.",
+  "description": "Cross-harness advice plus explicit plain and with-advice handoff families for Codex, Grok, Kiro, Claude, OpenCode, and Cursor through one fail-closed MJS authority.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"

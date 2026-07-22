@@ -13,6 +13,7 @@ test('v0.3 advice crosses request, machine, provider, result, Git, and DAG bound
     assert.equal(parsed.selection.resolved.model, 'fable');
     assert.equal(parsed.selection.resolved.maxTurns, 32);
     assert.equal(parsed.grants.resolved.write, false);
+    assert.deepEqual(parsed.delegation, { mode: 'advice-only', provenance: 'verb-derived' });
     assert.equal(parsed.git.changed, false);
     assert.equal(parsed.dag.nodes.length, 1);
   } finally { cleanupV03(context); }

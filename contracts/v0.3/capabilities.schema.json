@@ -4,13 +4,21 @@
   "title": "Handoff v0.3 capabilities",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "operations", "modes", "defaults", "providers"],
+  "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "operations", "rootForms", "nestedOperations", "modes", "defaults", "providers"],
   "properties": {
     "schemaVersion": { "const": "handoff.capabilities.v0.3" },
     "driverVersion": { "const": "0.4.0" },
     "bundleVersion": { "const": "0.4.0" },
     "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "operations": { "const": ["advice", "handoff"] },
+    "rootForms": {
+      "const": {
+        "advice": { "delegation": "advice-only" },
+        "run": { "delegation": "none" },
+        "run-with-advice": { "delegation": "advice-only" }
+      }
+    },
+    "nestedOperations": { "const": ["advice"] },
     "modes": { "const": ["build", "phase", "review", "verify"] },
     "defaults": {
       "type": "object", "additionalProperties": false,

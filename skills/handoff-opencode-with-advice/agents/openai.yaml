@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCode Handoff With Advice"
+  short_description: "Delegate to OpenCode with optional advice"
+  default_prompt: "Use $handoff-opencode-with-advice to delegate this bounded task to OpenCode and allow read-only consultation."

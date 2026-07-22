@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kiro Handoff"
+  short_description: "Delegate to Kiro without nested advice"
+  default_prompt: "Use $handoff-kiro to delegate this bounded task to Kiro with no nested Handoff capability."

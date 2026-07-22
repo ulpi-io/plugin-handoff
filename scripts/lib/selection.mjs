@@ -3,6 +3,8 @@ import { ContractError } from './contracts.mjs';
 export const HARNESSES = Object.freeze(['codex', 'grok', 'kiro', 'claude', 'opencode', 'cursor']);
 export const OPERATIONS = Object.freeze(['advice', 'handoff']);
 export const MODES = Object.freeze(['build', 'phase', 'review', 'verify']);
+export const ROOT_VERBS = Object.freeze(['advice', 'run', 'run-with-advice']);
+export const DELEGATION_MODES = Object.freeze(['none', 'advice-only']);
 
 export const DEFAULT_BUDGETS = Object.freeze({
   maxDepth: 3,
@@ -22,6 +24,19 @@ const EFFORTS = Object.freeze({
   opencode: Object.freeze(['low', 'medium', 'high', 'max']),
   cursor: Object.freeze([]),
 });
+
+export function resolveDelegation({ verb, parent = null }) {
+  if (parent !== null) {
+    if (verb !== 'advice') throw new ContractError('nested Handoff permits advice only');
+    if (!parent || parent.mode !== 'advice-only') throw new ContractError('nested advice requires an advice-only parent capability');
+    return Object.freeze({ mode: 'advice-only', provenance: 'parent-attenuated' });
+  }
+  if (!ROOT_VERBS.includes(verb)) throw new ContractError(`root verb must be ${ROOT_VERBS.join('|')}`);
+  return Object.freeze({
+    mode: verb === 'run' ? 'none' : 'advice-only',
+    provenance: 'verb-derived',
+  });
+}
 
 export const SELECTION_CAPABILITIES = Object.freeze(Object.fromEntries(HARNESSES.map((harness) => [harness, Object.freeze({
   model: true,

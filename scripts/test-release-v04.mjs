@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,9 +15,11 @@ const SUITES = Object.freeze([
   'test-contracts-selection-v03.mjs',
   'test-dag-v03.mjs',
   'test-frontend-v03.mjs',
+  'test-handoff-surface-matrix-v03.mjs',
+  'test-invocation-authority-v03.mjs',
   'test-machine-v03.mjs',
   'test-nested-client-v03.mjs',
-  'test-pipeline-e2e.mjs',
+  'test-plugin-manifests-v03.mjs',
   'test-provider-capabilities-installed-v03.mjs',
   'test-provider-claude-v03.mjs',
   'test-provider-codex-v03.mjs',
@@ -45,6 +47,7 @@ test('v0.4 release gate verifies the seal and runs the complete deterministic su
   const manifest = readBundleDigest();
   assert.equal(manifest.bundleVersion, '0.4.0');
   assert.equal(manifest.digest, digestBefore);
+  for (const removed of ['contracts/v0.2', 'scripts/prepare-request.mjs', 'scripts/test-pipeline-e2e.mjs']) assert.equal(existsSync(resolve(root, removed)), false, `${removed} must stay removed`);
 
   const check = spawnSync(process.execPath, [resolve(scripts, 'bundle-digest.mjs'), '--check'], {
     cwd: root, encoding: 'utf8', timeout: 30_000,
@@ -53,7 +56,7 @@ test('v0.4 release gate verifies the seal and runs the complete deterministic su
 
   const childEnvironment = { ...process.env, HANDOFF_RELEASE_GATE: '1' };
   delete childEnvironment.NODE_TEST_CONTEXT;
-  const run = spawnSync(process.execPath, ['--test', ...SUITES.map((name) => resolve(scripts, name))], {
+  const run = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...SUITES.map((name) => resolve(scripts, name))], {
     cwd: root,
     encoding: 'utf8',
     timeout: 300_000,

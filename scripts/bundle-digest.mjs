@@ -17,7 +17,7 @@ if (!['--check', '--write', '--json'].includes(mode) || process.argv.length > 3)
   }
 } else {
   const manifest = {
-    schemaVersion: 'handoff.bundle-digest.v0.2',
+    schemaVersion: 'handoff.bundle-digest.v0.3',
     bundleVersion: BUNDLE_VERSION,
     algorithm: 'sha256',
     files: [...BUNDLE_FILES],

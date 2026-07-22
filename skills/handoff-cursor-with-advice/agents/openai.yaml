@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cursor Handoff With Advice"
+  short_description: "Delegate to Cursor with optional advice"
+  default_prompt: "Use $handoff-cursor-with-advice to delegate this bounded task to Cursor and allow read-only consultation."

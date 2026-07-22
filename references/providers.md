@@ -3,6 +3,13 @@
 Every provider is reached through `scripts/handoff.mjs` and the same machine executor. “Supported”
 still requires that the installed CLI's authentication-free preflight passes for the requested mode.
 
+## Delegation choice
+
+Plain `run` records delegation `none` and gives the worker no supervisor capability. Root `advice`
+and explicit `run-with-advice` record `advice-only` and expose one authenticated private mailbox.
+That capability accepts nested read-only advice only; it never accepts build, phase, review, verify,
+`run`, or `run-with-advice`. Consultation is optional and is never started automatically.
+
 ## Selection, grants, and confinement
 
 | Target | Model | Effort | Turns | Bash | Web | Private MCP | Write boundary | Read-only boundary |
@@ -12,7 +19,7 @@ still requires that the installed CLI's authentication-free preflight passes for
 | Claude | yes | yes | 1–100 | on/off | yes | yes | file tools plus fail-closed Bash sandbox | no write tools; Bash deny-write sandbox; final Git check |
 | OpenCode | yes | variant | native default | on/off | yes | yes | permission-only Edit/Bash | permission-only tools plus final Git check |
 | Cursor | yes | no exact control | native default | on; `false` rejects | no | isolated temporary HOME | native target `--allow-paths` when behavior probe passes | native target `--readonly-paths` |
-| Kiro | yes | yes | native default | on/off | no | no proved isolated surface | permission-only `fs_write`/`execute_bash` | permission-only `fs_read`/optional Bash plus final Git check |
+| Kiro | yes | yes | native default | on/off | no | no proved isolated surface | build/phase not advertised | permission-only `fs_read`/optional Bash plus final Git check |
 
 Provider-default selections are recorded rather than guessed. Explicit unsupported effort, turn,
 web, MCP, or Bash controls reject; Handoff never silently substitutes another model or permission.
@@ -61,21 +68,22 @@ exact effort, web, or Bash-disable control.
 
 Kiro uses its native active-session-first, `KIRO_API_KEY`-second authentication precedence. Handoff
 passes model and effort, uses stdin-only one-shot input, never uses trust-all, and selects canonical
-`fs_read`, `fs_write`, and `execute_bash` tools by mode/grant. These are permissions, not native
-filesystem isolation. Current private custom-agent MCP isolation is not advertised. ANSI/tool-progress
-frames are normalized before strict provider-output validation.
+`fs_read` and optional `execute_bash` tools for its advertised review/verify modes. These are
+permissions, not native filesystem isolation. Current private custom-agent MCP isolation is not
+advertised. ANSI/tool-progress frames are normalized before strict provider-output validation.
 
 ## Nested-source authority
 
-All targets receive `HANDOFF_SUPERVISOR_CONTEXT` only while participating in a v0.3 root run. The
-context contains a local endpoint and bounded capability token, never a DAG path. Nested requests go
-back to the supervisor; provider CLIs are never invoked recursively by the worker. Higher-level
-`run` remains limited to a derived Codex or Claude caller, while `advice` accepts every derived
-caller/compatible target pair.
+Targets receive `HANDOFF_SUPERVISOR_CONTEXT` only for root advice or `run-with-advice`; plain workers
+receive no context. The context contains a private mailbox path, an `advice-only` operation list,
+and a bounded capability token, never a DAG path. Nested advice goes back to the supervisor and the
+worker never invokes a provider CLI recursively. Root re-entry and direct machine execution are
+blocked by a private active-root lease even if a worker strips the supervisor environment.
 
 ## Shared enforcement
 
 All adapters share request/result validation, exact request and intent hashes, private-path checks,
 bounded output, timeout/cancellation mapping, redaction, deterministic Git fingerprints,
-build-without-change blocking, and read-only mutation blocking. Provider sandboxing is not a
-boundary against the coordinator or another same-UID process.
+build-without-change blocking, and read-only mutation blocking. Root Handoffs are serialized per OS
+user. Provider sandboxing, mailbox permissions, and the lease are not a boundary against a malicious
+same-UID process that copies, deletes, or reparents Handoff state.
